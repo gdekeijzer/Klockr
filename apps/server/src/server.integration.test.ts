@@ -84,7 +84,7 @@ describe('server + PostgreSQL (requires PostgreSQL)', () => {
       const after = await fetch(`${second.baseUrl}/api/v1/board/state`, {
         headers: { authorization: `Bearer ${boardShareToken}` },
       });
-      expect(await after.json()).toMatchObject({ timer: { status: 'running' } });
+      expect(await after.json()).toMatchObject({ queues: [{ timers: [{ status: 'running' }] }] });
     } finally {
       await second.close();
     }
