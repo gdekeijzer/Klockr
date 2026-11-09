@@ -105,9 +105,9 @@ export function toBoardConfig(board: Board): BoardConfigDto {
     preset: board.preset,
     audience: board.audience,
     sources:
-      board.sources.kind === 'primary'
-        ? { kind: 'primary' }
-        : { kind: 'queues', queueIds: [...board.sources.queueIds] },
+      board.sources.kind === 'selected'
+        ? { kind: 'selected', queueIds: [...board.sources.queueIds] }
+        : { kind: board.sources.kind },
     components: board.components.map((c) => ({ ...c })),
     presentation: { ...board.presentation },
     revision: board.revision,
@@ -202,7 +202,11 @@ export function toBoardSnapshot(
       .map((c) => c.upcoming),
   );
 
-  const queues: BoardQueue[] = boardSourceQueues(board, show.primaryQueueId).flatMap((queueId) => {
+  const queues: BoardQueue[] = boardSourceQueues(
+    board,
+    show.primaryQueueId,
+    show.queues.map((q) => q.queue.id),
+  ).flatMap((queueId) => {
     const view = queueView(show, queueId);
     if (!view) return [];
     const projection = schedule.queues.get(queueId);
@@ -248,6 +252,7 @@ export function toBoardSnapshot(
         discipline: view.queue.discipline,
         isPrimary: view.queue.id === show.primaryQueueId,
         current: currentVisible ? toItem(current) : null,
+        standBy: current !== undefined && !currentVisible,
         currentNotes:
           enabled.has('notes') && currentVisible && areNotesVisibleTo(current, audience)
             ? current.notes
@@ -258,10 +263,10 @@ export function toBoardSnapshot(
         warning: resolveItemThresholds(
           show.showWarning,
           view.queue.warning,
-          current?.warning ?? null,
+          currentVisible ? current.warning : null,
         ).rule,
         offsetMs: projection?.showOffsetMs ?? null,
-        growsAfter: growsAfter(current),
+        growsAfter: currentVisible ? growsAfter(current) : null,
         toleranceMs: show.showSchedule.toleranceMs,
         severeBehindMs: show.showSchedule.severeBehindMs,
         anchor:

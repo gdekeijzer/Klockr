@@ -183,6 +183,7 @@ Presets (Timer, Speaker, Note, Break) are UI only and all send `item.add`. `GET 
 ## Implemented in M4
 
 - `POST /api/v1/shows/:showId/commands` accepts the new commands: `queue.create / update / move / setPrimary / delete`, `item.moveToQueue`, `item.setVisibility`, `relation.create / update / delete`, `suggestion.accept / ignore`, `board.create / update / delete`, `message.send / clear`. `item.add`, `group.add`, `queue.setWarning`, `queue.setTimingMode` take an optional `queueId` (default: Primary). The response is `ShowCommandResponse { state, createdId? }` with the full Show State snapshot.
+- Board `sources` in `board.update` / snapshots: `{ kind: 'primary' } | { kind: 'all' } | { kind: 'selected', queueIds }`. Board projections carry `standBy` per Queue (hidden Current) and Messages in display order (first = dominant).
 - `GET /api/v1/shows/:showId/state` returns `ShowStateSnapshot { show {id, title, revision, primaryQueueId, …}, queues[], relations[], suggestions[], boards[], messages[], serverTime }`.
 - `POST /api/v1/shows/:showId/board-shares` accepts `{ boardId? }` (default: the first Board) and returns a read-only token for exactly that Board.
 - `GET /api/v1/shows/:showId/boards/:boardId/preview` (management) returns the same scoped `BoardStateSnapshot` a Board token receives.

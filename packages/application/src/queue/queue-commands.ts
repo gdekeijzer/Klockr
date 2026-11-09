@@ -638,9 +638,9 @@ export function applyShowCommand(
         ...(sources
           ? {
               sources:
-                sources.kind === 'primary'
-                  ? { kind: 'primary' }
-                  : { kind: 'queues', queueIds: sources.queueIds.map(QueueId) },
+                sources.kind === 'selected'
+                  ? { kind: 'selected', queueIds: sources.queueIds.map(QueueId) }
+                  : { kind: sources.kind },
             }
           : {}),
         presentation: {

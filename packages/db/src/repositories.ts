@@ -389,14 +389,15 @@ function boardFromRow(
     name: row.name,
     preset,
     audience: row.audience as Audience,
-    sources: row.followPrimary
-      ? { kind: 'primary' }
-      : {
-          kind: 'queues',
-          queueIds: [...sources]
-            .sort((a, b) => a.position - b.position)
-            .map((s) => QueueId(s.queueId)),
-        },
+    sources:
+      row.sourceMode === 'selected'
+        ? {
+            kind: 'selected',
+            queueIds: [...sources]
+              .sort((a, b) => a.position - b.position)
+              .map((s) => QueueId(s.queueId)),
+          }
+        : { kind: row.sourceMode === 'all' ? 'all' : 'primary' },
     // An empty list (M1 boards before M4) means: the preset's default components.
     components:
       row.components.length > 0
@@ -416,7 +417,8 @@ function boardColumns(b: Board) {
     preset: b.preset,
     name: b.name,
     audience: b.audience,
-    followPrimary: b.sources.kind === 'primary',
+    sourceMode: b.sources.kind,
+    followPrimary: b.sources.kind === 'primary', // legacy column, kept consistent
     components: b.components.map((c) => ({ ...c })),
     presentation: { ...b.presentation },
     createdAt: toDate(b.createdAt),
@@ -825,7 +827,7 @@ export class PgShowStore
             await tx.update(boards).set(boardColumns(b)).where(eq(boards.id, b.id));
           if (!before || before.sources !== b.sources) {
             await tx.delete(boardSources).where(eq(boardSources.boardId, b.id));
-            if (b.sources.kind === 'queues' && b.sources.queueIds.length > 0) {
+            if (b.sources.kind === 'selected' && b.sources.queueIds.length > 0) {
               await tx.insert(boardSources).values(
                 b.sources.queueIds.map((queueId, position) => ({
                   boardId: b.id,

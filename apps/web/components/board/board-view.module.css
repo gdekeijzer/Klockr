@@ -90,6 +90,13 @@
   font-size: clamp(28px, 7vw, 120px);
 }
 
+.standBy {
+  font-size: clamp(28px, 7vw, 120px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--k-text-secondary);
+}
+
 .titleSub {
   font-size: clamp(14px, 2.2vw, 36px);
   color: var(--k-text-secondary);

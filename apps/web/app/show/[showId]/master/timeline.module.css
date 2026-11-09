@@ -107,7 +107,7 @@
 }
 
 .block[data-conflict='true'] {
-  border-color: var(--k-state-warning);
+  border: 2px dashed var(--k-state-warning);
 }
 
 .blockTitle {

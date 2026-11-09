@@ -129,14 +129,13 @@ test('M4 Boards: presets, scoped sources/audiences, Messages, disconnect + resyn
   const speakerUrl = await page.getByTestId('board-share-link').inputValue();
   expect(speakerUrl).toMatch(/\/b\/klb_/);
 
-  // 2. Production Board with sources Program + Audio + Lighting, via the UI.
+  // 2. Production Board via the UI: defaults to All Queues (dynamic source mode).
   await page.getByLabel('Board preset').selectOption('production');
   await page.getByRole('button', { name: '+ Create Board' }).click();
   const config = page.getByTestId('board-config');
   await expect(config.getByLabel('Board name')).not.toHaveValue('Speaker Board');
+  await expect(config.getByLabel('Board sources')).toHaveValue('all');
   await config.getByLabel('Board name').fill('FOH');
-  await config.getByLabel('Follow Primary Queue').uncheck();
-  for (const q of ['Program', 'Audio', 'Lighting']) await config.getByLabel(`Source ${q}`).check();
   await config.getByRole('button', { name: 'Save Board' }).click();
   await expect(page.locator('[data-testid="board-list-item"][data-name="FOH"]')).toContainText(
     'FOH / Production · production',
@@ -175,6 +174,12 @@ test('M4 Boards: presets, scoped sources/audiences, Messages, disconnect + resyn
       '[data-testid="board-queue"][data-queue="Audio"] [data-testid="board-queue-current"]',
     ),
   ).toHaveText('Walk-in');
+  // Source mode `all`: a Queue added later appears automatically.
+  await api(page, showId, 'queue.create', { name: 'Video', discipline: 'Video' });
+  await expect(columns).toHaveCount(4);
+  await expect(
+    production.page.locator('[data-testid="board-queue"][data-queue="Video"]'),
+  ).toBeVisible();
 
   // 5. Speaker and Public Boards do not show it — and the server never sent it.
   await expect(speaker.page.getByTestId('board-title')).toHaveText('Opening');
@@ -212,7 +217,15 @@ test('M4 Boards: presets, scoped sources/audiences, Messages, disconnect + resyn
   await expect(speaker.page.getByTestId('board-timer')).toBeVisible(); // timer stays, compact
   await expect(production.page.getByTestId('board-message')).toHaveCount(0);
   await expect(lobby.page.getByTestId('board-message')).toHaveCount(0);
+  // Several active Messages: one dominant Message (same priority -> most recent wins).
+  await messages.getByRole('button', { name: 'STOP', exact: true }).click();
+  await expect(speaker.page.getByTestId('board-message')).toHaveText('STOP');
+  await expect(speaker.page.getByTestId('board-message')).toHaveCount(1);
+  await expect(messages.getByTestId('active-message')).toHaveCount(2);
   await speaker.page.screenshot({ path: 'test-results/m4-speaker-message.png' });
+  // Clearing the visible one reveals the next valid Message.
+  await messages.getByRole('button', { name: 'Clear message STOP' }).click();
+  await expect(speaker.page.getByTestId('board-message')).toHaveText('WRAP UP');
 
   // 8-9. Clear: the normal timer view returns.
   await messages.getByRole('button', { name: 'Clear message WRAP UP' }).click();
@@ -242,7 +255,7 @@ test('M4 Boards: presets, scoped sources/audiences, Messages, disconnect + resyn
       { timeout: 10_000 },
     )
     .toBeLessThan(prodAtOutage);
-  await expect(production.page.getByTestId('board-queue')).toHaveCount(3);
+  await expect(production.page.getByTestId('board-queue')).toHaveCount(4);
 
   // 12-13. Restart: both Boards resynchronize to the authoritative state.
   await server.start();
@@ -261,6 +274,22 @@ test('M4 Boards: presets, scoped sources/audiences, Messages, disconnect + resyn
   await expect(page.getByTestId('connection-status')).toHaveText('LIVE');
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await expect(speaker.page.getByTestId('board-timer')).toHaveAttribute('data-status', 'paused');
+
+  // Hidden Current: the Speaker Board shows STAND BY — no title, timer or data of the item.
+  await api(page, showId, 'item.setVisibility', {
+    queueItemId: opening,
+    visibility: ['production'],
+  });
+  await expect(speaker.page.getByTestId('board-standby')).toHaveText('STAND BY');
+  await expect(speaker.page.getByTestId('board-timer')).toHaveCount(0);
+  await expect(speaker.page.locator('main')).not.toContainText('Opening');
+  expect(await rawBoardState(page, speakerUrl)).not.toContain('Opening');
+  await expect(
+    production.page.locator(
+      '[data-testid="board-queue"][data-queue="Program"] [data-testid="board-queue-current"]',
+    ),
+  ).toHaveText('Opening');
+  await speaker.page.screenshot({ path: 'test-results/m4-speaker-standby.png' });
 
   // The Board's browser holds no management credential.
   const attempt = await speaker.page.evaluate(async (id) => {

@@ -7,7 +7,7 @@ import type {
   BoardStateSnapshot,
   TimerSnapshot,
 } from '@klockr/contracts';
-import { classifyOffset, deriveTimer, timerPhase } from '@klockr/domain';
+import { classifyOffset, deriveTimer, selectDominantMessage, timerPhase } from '@klockr/domain';
 import {
   colorVar,
   formatClock,
@@ -38,9 +38,10 @@ export function BoardView(props: {
 }) {
   const { board, timers, now } = props;
   const enabled = board.board.components.filter((c) => c.enabled);
-  // Messages expire locally on `expiresAt` (also while disconnected).
-  const messages = board.messages.filter((m) => m.expiresAt === null || now < m.expiresAt);
-  const message = enabled.some((c) => c.kind === 'message') ? messages[0] : undefined;
+  // One dominant Message (priority, then most recent); expiry is evaluated locally (also while
+  // disconnected), so the next valid Message takes over without a server round trip.
+  const dominant = selectDominantMessage(board.messages, now);
+  const message = enabled.some((c) => c.kind === 'message') && dominant ? dominant : undefined;
   const primary = board.queues[0];
   const single = board.board.preset === 'speaker_confidence' || board.board.preset === 'custom';
 
@@ -116,6 +117,10 @@ function Component(props: {
         >
           {current ? (
             <span className={styles.titleMain}>{current.title}</span>
+          ) : primary?.standBy ? (
+            <span className={styles.standBy} data-testid="board-standby">
+              STAND BY
+            </span>
           ) : (
             <span className={styles.titleSub}>—</span>
           )}
@@ -305,7 +310,7 @@ function QueueColumn(props: {
         )}
       </header>
       <strong className={styles.columnTitle} data-testid="board-queue-current">
-        {queue.current?.title ?? '—'}
+        {queue.current?.title ?? (queue.standBy ? 'STAND BY' : '—')}
       </strong>
       {timer && view ? (
         <div className={styles.columnTimer}>

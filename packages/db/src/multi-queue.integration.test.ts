@@ -150,12 +150,13 @@ describe('PostgreSQL multi-Queue / Boards persistence (requires PostgreSQL)', ()
     const revision = (await s.load()).revision;
     await s.run({ type: 'item.end', payload: { queueItemId: p.opening, next: true } });
     const foh = await s.run({ type: 'board.create', payload: { preset: 'production' } });
+    const allBoard = await s.run({ type: 'board.create', payload: { preset: 'production' } });
     await s.run({
       type: 'board.update',
       payload: {
         boardId: foh,
         name: 'FOH',
-        sources: { kind: 'queues', queueIds: [p.program, p.audio, p.light] },
+        sources: { kind: 'selected', queueIds: [p.program, p.audio, p.light] },
       },
     });
     await s.run({
@@ -186,8 +187,11 @@ describe('PostgreSQL multi-Queue / Boards persistence (requires PostgreSQL)', ()
     expect(show.boards.find((b) => b.id === foh)).toMatchObject({
       name: 'FOH',
       audience: 'production',
-      sources: { kind: 'queues', queueIds: [p.program, p.audio, p.light] },
+      sources: { kind: 'selected', queueIds: [p.program, p.audio, p.light] },
     });
+    // Source mode `all` survives a reload as the dynamic mode (not as a frozen list).
+    expect(show.boards.find((b) => b.id === allBoard)?.sources).toEqual({ kind: 'all' });
+    expect(show.boards[0]?.sources).toEqual({ kind: 'primary' });
     expect(show.queues[0]?.items.find((i) => i.id === p.keynote)?.visibility).toEqual([
       'production',
     ]);
@@ -262,7 +266,7 @@ describe('PostgreSQL multi-Queue / Boards persistence (requires PostgreSQL)', ()
     const foh = await s.run({ type: 'board.create', payload: { preset: 'production' } });
     await s.run({
       type: 'board.update',
-      payload: { boardId: foh, sources: { kind: 'queues', queueIds: [p.light] } },
+      payload: { boardId: foh, sources: { kind: 'selected', queueIds: [p.light] } },
     });
     await s.run({ type: 'queue.delete', payload: { queueId: p.light } });
     const show = await s.load();

@@ -8,7 +8,7 @@ import { LockIcon } from '../../../../components/LockIcon';
 import styles from '../show.module.css';
 import tl from './timeline.module.css';
 
-const PX_PER_MINUTE = 6;
+const PX_PER_MINUTE = 8;
 const MIN = 60_000;
 
 /**
@@ -111,7 +111,7 @@ export function Timeline(props: {
                             data-conflict={conflict}
                             data-testid="timeline-block"
                             data-title={item.title}
-                            title={`${item.title} · planned ${formatClock(s.plannedStart, tz)} · projected ${formatClock(s.projectedStart, tz)}`}
+                            title={`${item.title} · planned ${formatClock(s.plannedStart, tz)} · projected ${formatClock(s.projectedStart, tz)}${s.link ? ` · linked ${formatClock(s.link.desiredStart, tz)}` : ''}${conflict ? ' · CONFLICT: cannot start at the linked time' : ''}`}
                             onClick={() => {
                               props.onSelect(item.id);
                             }}
@@ -120,8 +120,8 @@ export function Timeline(props: {
                             <span className={tl.blockMeta}>
                               {item.lifecycle === 'current' && 'CURRENT '}
                               {item.fixedAnchor && 'FIXED '}
-                              {(relation || relationsBySource.has(item.id)) && 'LINK '}
                               {conflict && 'CONFLICT '}
+                              {(relation || relationsBySource.has(item.id)) && 'LINK '}
                               {Math.abs(shift) > tolerance &&
                                 item.lifecycle !== 'completed' &&
                                 `SHIFT ${formatOffset(shift)}`}
@@ -144,8 +144,9 @@ export function Timeline(props: {
         </div>
       </div>
       <p className={styles.muted}>
-        Outline = planned · filled = projected · LINK = related across Queues · FIXED = fixed anchor
-        · the axis stays put while the show runs.
+        Outline = planned · filled = projected · LINK = related across Queues · dashed CONFLICT =
+        cannot start at the linked time (shown on the item, never as an extra block) · FIXED = fixed
+        anchor · the axis stays put while the show runs.
       </p>
     </div>
   );

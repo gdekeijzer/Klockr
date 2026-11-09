@@ -62,7 +62,19 @@ export function isMessageActive(message: Message, now: EpochMs): boolean {
   return message.clearedAt === null && (message.expiresAt === null || now < message.expiresAt);
 }
 
-/** Messages a Board shows at `now` (newest first; urgent before normal). */
+/**
+ * Display order of active Messages: higher priority first; at equal priority the most recently
+ * created first. Several Messages may be active at once; a Board renders only the first one.
+ */
+export function compareMessages(
+  a: { readonly priority: MessagePriority; readonly createdAt: EpochMs },
+  b: { readonly priority: MessagePriority; readonly createdAt: EpochMs },
+): number {
+  const rank = (p: MessagePriority) => (p === 'urgent' ? 1 : 0);
+  return rank(b.priority) - rank(a.priority) || b.createdAt - a.createdAt;
+}
+
+/** Messages addressed to a Board (audience or id) that are active at `now`, in display order. */
 export function messagesFor(
   messages: readonly Message[],
   board: { readonly id: BoardId; readonly audience: Audience },
@@ -74,9 +86,34 @@ export function messagesFor(
         isMessageActive(m, now) &&
         (m.audiences.includes(board.audience) || m.boardIds.includes(board.id)),
     )
-    .sort(
-      (a, b) =>
-        (a.priority === b.priority ? 0 : a.priority === 'urgent' ? -1 : 1) ||
-        b.createdAt - a.createdAt,
-    );
+    .sort(compareMessages);
+}
+
+/**
+ * The single dominant Message a Board renders, or null (normal layout). When it is cleared or
+ * expires, the next valid active Message takes over automatically.
+ */
+export function dominantMessage(
+  messages: readonly Message[],
+  board: { readonly id: BoardId; readonly audience: Audience },
+  now: EpochMs,
+): Message | null {
+  return messagesFor(messages, board, now)[0] ?? null;
+}
+
+/**
+ * Client-side re-selection over an already scoped list (a Board snapshot): drops Messages that
+ * expired locally since the snapshot (also while disconnected) and applies the same order.
+ */
+export function selectDominantMessage<
+  T extends {
+    readonly priority: MessagePriority;
+    readonly createdAt: EpochMs;
+    readonly expiresAt: EpochMs | null;
+  },
+>(messages: readonly T[], now: EpochMs): T | null {
+  return (
+    messages.filter((m) => m.expiresAt === null || now < m.expiresAt).sort(compareMessages)[0] ??
+    null
+  );
 }

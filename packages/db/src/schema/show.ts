@@ -199,8 +199,10 @@ export const boards = pgTable(
     name: text('name').notNull().default('Speaker Board'),
     /** Exactly one primary audience. */
     audience: text('audience').notNull().default('stage'),
-    /** true = source is the Show's Primary Queue; false = `board_sources`. */
+    /** Legacy (M4): true = Primary. Superseded by `source_mode`; kept consistent on write. */
     followPrimary: boolean('follow_primary').notNull().default(true),
+    /** `primary` | `all` (dynamic, every Queue) | `selected` (`board_sources`). */
+    sourceMode: text('source_mode').notNull().default('primary'),
     /**
      * Constrained component configuration (versioned presentation JSON, validated by the domain):
      * [{ kind, enabled, size, upcoming }] in presentation order. Empty = preset defaults.
@@ -227,6 +229,7 @@ export const boards = pgTable(
       'boards_audience_check',
       sql`${t.audience} in ('stage', 'production', 'backstage', 'public', 'broadcast')`,
     ),
+    check('boards_source_mode_check', sql`${t.sourceMode} in ('primary', 'all', 'selected')`),
   ],
 );
 

@@ -307,14 +307,14 @@ export function normalizeShow(show: ShowAggregate, _now: EpochMs): ShowAggregate
   });
   const lockIds = new Set(locks.map((l) => l.id));
   const boards = show.boards.map((b) => {
-    if (b.sources.kind !== 'queues') return b;
+    if (b.sources.kind !== 'selected') return b;
     const kept = b.sources.queueIds.filter((id) => queueIds.has(id));
     if (kept.length === b.sources.queueIds.length) return b;
     return {
       ...b,
       sources:
         kept.length > 0
-          ? { kind: 'queues' as const, queueIds: kept }
+          ? { kind: 'selected' as const, queueIds: kept }
           : { kind: 'primary' as const },
       revision: b.revision + 1,
     };

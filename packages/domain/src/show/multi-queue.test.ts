@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { areNotesVisibleTo, isItemVisibleTo, setItemVisibility } from '../audience';
-import { presetDefaults, validateBoard, type Board } from '../board';
+import { boardSourceQueues, presetDefaults, validateBoard, type Board } from '../board';
 import { BoardId, QueueId, QueueItemId, ShowId } from '../ids';
-import { createMessage, messagesFor, type Message } from '../message';
+import {
+  createMessage,
+  dominantMessage,
+  messagesFor,
+  selectDominantMessage,
+  type Message,
+} from '../message';
 import { addItem, endItem, setCurrent, updateItem } from '../queue/operations';
 import { nextItem } from '../queue/order';
 import {
@@ -205,7 +211,7 @@ describe('peer Queues and Primary', () => {
     ).show;
     const board: Board = {
       ...(s.boards[0] as Board),
-      sources: { kind: 'queues', queueIds: [QueueId(audio)] },
+      sources: { kind: 'selected', queueIds: [QueueId(audio)] },
     };
     s = { ...s, boards: [board] };
     s = unwrap(deleteQueue(s, audio, 0));
@@ -282,6 +288,31 @@ describe('cross-Queue relations', () => {
       link: { desiredStart: at(10, 14, 30), conflict: false },
     });
     expect(projection.converged).toBe(true);
+  });
+
+  it('a link more than the tolerance before the previous item ends never overlaps it: CONFLICT is a status', () => {
+    const p = planned();
+    const relationId = p.show.relations[0]?.id ?? '';
+    // Keynote 10:10 -> mic desired 10:05, but Walk-in (Audio) runs until 10:10.
+    const s = unwrap(updateRelation(p.show, { relationId, offsetMs: -5 * MINUTE_MS }, ctx()));
+    const projection = calculateShowSchedule(s, at(10, 0));
+    const items = projection.queues.get(p.audio)?.items ?? [];
+    const walkin = items.find((i) => i.id === p.id('walkin'));
+    const mic = items.find((i) => i.id === p.id('mic'));
+    expect(walkin?.projectedEnd).toBe(at(10, 10));
+    expect(mic).toMatchObject({
+      projectedStart: at(10, 10),
+      link: { desiredStart: at(10, 5), conflict: true },
+    });
+    expect(projection.relations[0]?.conflict).toBe(true);
+    // Within the tolerance the exact offset is kept (a tolerated trim of the previous item).
+    const tolerated = calculateShowSchedule(p.show, at(10, 0))
+      .queues.get(p.audio)
+      ?.items.find((i) => i.id === p.id('mic'));
+    expect(tolerated).toMatchObject({
+      projectedStart: at(10, 9, 30),
+      link: { desiredStart: at(10, 9, 30), conflict: false },
+    });
   });
 
   it('Strict keeps an explicit planned start: earlier link -> conflict, never earlier than planned', () => {
@@ -550,10 +581,10 @@ describe('audiences, notes and Boards', () => {
     });
     expect(speaker.components.find((c) => c.kind === 'notes')?.enabled).toBe(false);
     const production = presetDefaults('production');
-    expect(production.audience).toBe('production');
+    expect(production).toMatchObject({ audience: 'production', sources: { kind: 'all' } });
     const base = { ...(baseShow().boards[0] as Board) };
     expect(
-      validateBoard({ ...base, sources: { kind: 'queues', queueIds: [QueueId('nope')] } }, [
+      validateBoard({ ...base, sources: { kind: 'selected', queueIds: [QueueId('nope')] } }, [
         QueueId('program'),
       ]).ok,
     ).toBe(false);
@@ -567,6 +598,30 @@ describe('audiences, notes and Boards', () => {
       ).ok,
     ).toBe(false);
     expect(validateBoard(base, [QueueId('program')]).ok).toBe(true);
+  });
+
+  it('source modes: primary follows the Primary, all is dynamic, selected is fixed', () => {
+    const p = production();
+    const base = { ...(p.show.boards[0] as Board) };
+    const ids = (show: ShowAggregate) => show.queues.map((q) => q.queue.id);
+    const sources = (board: Board, show: ShowAggregate) =>
+      boardSourceQueues(board, show.primaryQueueId, ids(show));
+    const primary = { ...base, sources: { kind: 'primary' as const } };
+    const all = { ...base, sources: { kind: 'all' as const } };
+    const selected = {
+      ...base,
+      sources: { kind: 'selected' as const, queueIds: [QueueId(p.audio)] },
+    };
+    expect(sources(all, p.show)).toEqual(ids(p.show));
+    // A Queue added later appears automatically in `all` only.
+    const video = unwrap(addQueue(p.show, { name: 'Video' }, ctx()));
+    expect(sources(all, video.show)).toEqual([...ids(p.show), video.queueId]);
+    expect(sources(selected, video.show)).toEqual([p.audio]);
+    expect(sources(primary, video.show)).toEqual(['program']);
+    // `primary` follows a Primary change.
+    const switched = unwrap(setPrimaryQueue(video.show, p.audio));
+    expect(sources(primary, switched)).toEqual([p.audio]);
+    expect(validateBoard(all, ids(p.show)).ok).toBe(true);
   });
 
   it('messages target audiences and/or Boards and expire', () => {
@@ -609,6 +664,76 @@ describe('audiences, notes and Boards', () => {
         now: 0,
       }).ok,
     ).toBe(false);
+  });
+});
+
+describe('multiple active Messages: one dominant Message per Board', () => {
+  const stage = { id: BoardId('b1'), audience: 'stage' as const };
+  const msg = (
+    text: string,
+    priority: 'normal' | 'urgent',
+    createdAt: number,
+    ttl: number | null = null,
+    audiences: ('stage' | 'production')[] = ['stage'],
+  ): Message =>
+    unwrap(
+      createMessage({
+        id: text,
+        text,
+        audiences,
+        boardIds: [],
+        priority,
+        ttlMs: ttl,
+        now: createdAt,
+      }),
+    );
+  const t0 = at(10, 0);
+
+  it('several Messages stay active; the highest priority wins', () => {
+    const list = [
+      msg('5 MIN', 'normal', t0 + 2000),
+      msg('STOP', 'urgent', t0),
+      msg('HI', 'normal', t0 + 1000),
+    ];
+    expect(messagesFor(list, stage, t0 + 3000).map((m) => m.text)).toEqual(['STOP', '5 MIN', 'HI']);
+    expect(dominantMessage(list, stage, t0 + 3000)?.text).toBe('STOP');
+  });
+
+  it('at equal priority the most recently created Message wins', () => {
+    const list = [msg('WRAP UP', 'urgent', t0), msg('STOP', 'urgent', t0 + 5000)];
+    expect(dominantMessage(list, stage, t0 + 6000)?.text).toBe('STOP');
+  });
+
+  it('only Messages for this Board/audience count', () => {
+    const list = [
+      msg('MIC 3', 'urgent', t0 + 9000, null, ['production']),
+      msg('WRAP UP', 'normal', t0),
+    ];
+    expect(dominantMessage(list, stage, t0 + 10_000)?.text).toBe('WRAP UP');
+  });
+
+  it('clearing the visible Message reveals the next valid one; none left -> normal layout', () => {
+    const stop = msg('STOP', 'urgent', t0 + 1000);
+    const wrap = msg('WRAP UP', 'normal', t0);
+    const cleared = { ...stop, clearedAt: t0 + 2000 };
+    expect(dominantMessage([stop, wrap], stage, t0 + 1500)?.text).toBe('STOP');
+    expect(dominantMessage([cleared, wrap], stage, t0 + 2500)?.text).toBe('WRAP UP');
+    expect(
+      dominantMessage([cleared, { ...wrap, clearedAt: t0 + 3000 }], stage, t0 + 3500),
+    ).toBeNull();
+  });
+
+  it('expiry of the visible Message reveals the next valid one (also client-side)', () => {
+    const urgent = msg('STOP', 'urgent', t0 + 1000, 30 * SECOND_MS);
+    const normal = msg('THANK YOU', 'normal', t0, MINUTE_MS);
+    const list = [urgent, normal];
+    expect(dominantMessage(list, stage, t0 + 20_000)?.text).toBe('STOP');
+    expect(dominantMessage(list, stage, t0 + 31_000)?.text).toBe('THANK YOU');
+    expect(dominantMessage(list, stage, t0 + 61_000)).toBeNull();
+    // The Board re-selects locally from its scoped snapshot with the same rule.
+    expect(selectDominantMessage(list, t0 + 20_000)?.text).toBe('STOP');
+    expect(selectDominantMessage(list, t0 + 31_000)?.text).toBe('THANK YOU');
+    expect(selectDominantMessage(list, t0 + 61_000)).toBeNull();
   });
 });
 

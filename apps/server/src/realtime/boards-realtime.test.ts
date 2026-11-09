@@ -54,7 +54,7 @@ describe('M4 realtime: scoped Board projections, Show state, messages', () => {
       (await command(server, show, 'board.create', { preset: 'production' })).createdId ?? '';
     const state = await command(server, show, 'board.update', {
       boardId: foh,
-      sources: { kind: 'queues', queueIds: [audio] },
+      sources: { kind: 'selected', queueIds: [audio] },
     });
     expect(state.state.queues).toHaveLength(2);
 

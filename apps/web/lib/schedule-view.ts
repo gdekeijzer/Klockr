@@ -122,9 +122,9 @@ export function showAggregateFromSnapshot(
       id: BoardId(b.id),
       showId,
       sources:
-        b.sources.kind === 'primary'
-          ? { kind: 'primary' }
-          : { kind: 'queues', queueIds: b.sources.queueIds.map(QueueId) },
+        b.sources.kind === 'selected'
+          ? { kind: 'selected', queueIds: b.sources.queueIds.map(QueueId) }
+          : { kind: b.sources.kind },
       createdAt: 0,
       updatedAt: 0,
     })),

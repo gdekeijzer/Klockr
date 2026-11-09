@@ -207,6 +207,16 @@ test('M4 multi-Queue: peer Queues, independent Current, simultaneous timers, rel
     page.locator('[data-testid="timeline-block"][data-title="Keynote mic"]'),
   ).toContainText('LINK');
   await expect(page.getByTestId('timeline-now')).toHaveCount(1);
+  // A CONFLICT is a status of the linked item (Keynote look cannot start while Opening look is
+  // still Current): it is drawn after its predecessor, never as a block over the Current item.
+  const block = (title: string) =>
+    page.locator(`[data-testid="timeline-block"][data-title="${title}"]`);
+  await expect(block('Keynote look')).toHaveAttribute('data-conflict', 'true');
+  await expect(block('Keynote look')).toContainText('CONFLICT');
+  await expect(block('Opening look')).toHaveAttribute('data-current', 'true');
+  const current = await block('Opening look').boundingBox();
+  const linked = await block('Keynote look').boundingBox();
+  expect(current && linked && linked.x >= current.x + current.width - 1).toBe(true);
   await page.screenshot({ path: 'test-results/m4-master-timeline.png' });
 
   // 20-21. Reload: Currents, relations and (no longer pending) suggestions persist.

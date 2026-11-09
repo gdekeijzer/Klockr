@@ -209,14 +209,17 @@ export function calculateSchedule(
       const desired = links.get(item.id);
       let candidate: EpochMs | null;
       if (desired !== undefined) {
-        // Relation timing replaces the own sequence as the basis; Strict planned starts and
-        // fixed anchors still hold; never before now.
+        // Relation timing is the desired basis; Strict planned starts and fixed anchors still
+        // hold; never before now. It never starts more than the Show tolerance before what its
+        // own Queue allows (the previous item's projected end): beyond that it is projected after
+        // the previous item and the relation is in CONFLICT — a status of this item, never a
+        // second block overlapping its predecessor.
+        const tolerance = agg.showSchedule.toleranceMs;
         candidate = max(holdsPlan && plan.start !== null ? max(desired, plan.start) : desired, now);
-        const overlapsPrevious = cursor !== null && desired < cursor - agg.showSchedule.toleranceMs;
+        if (cursor !== null && candidate < cursor - tolerance) candidate = cursor;
         link = {
           desiredStart: desired,
-          conflict:
-            overlapsPrevious || Math.abs(candidate - desired) > agg.showSchedule.toleranceMs,
+          conflict: Math.abs(candidate - desired) > tolerance,
         };
       } else {
         candidate = cursor ?? plan.start;

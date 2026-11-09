@@ -148,6 +148,7 @@ export function boardFixture(
               fixedAnchor: false,
             }
           : null,
+        standBy: false,
         currentNotes: null,
         next: null,
         upcoming: [],

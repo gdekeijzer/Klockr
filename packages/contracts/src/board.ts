@@ -42,7 +42,8 @@ export type BoardComponentDto = z.infer<typeof boardComponentSchema>;
 
 export const boardSourcesSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('primary') }),
-  z.object({ kind: z.literal('queues'), queueIds: z.array(idSchema).min(1).max(20) }),
+  z.object({ kind: z.literal('all') }),
+  z.object({ kind: z.literal('selected'), queueIds: z.array(idSchema).min(1).max(20) }),
 ]);
 export type BoardSourcesDto = z.infer<typeof boardSourcesSchema>;
 
@@ -144,6 +145,11 @@ export const boardQueueSchema = z.object({
   isPrimary: z.boolean(),
   /** Visible Current, or null (nothing current or not visible to this audience). */
   current: boardItemSchema.nullable(),
+  /**
+   * True when the Queue HAS a Current that is not visible to this Board's audience: the Board
+   * renders STAND BY. No data of the hidden item is ever included.
+   */
+  standBy: z.boolean(),
   /** Published notes of the current item (only with a Notes component AND explicit audience). */
   currentNotes: z.string().nullable(),
   next: boardItemSchema.nullable(),

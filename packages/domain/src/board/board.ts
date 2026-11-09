@@ -46,9 +46,16 @@ export interface BoardComponent {
   readonly upcoming: number;
 }
 
-/** Data sources: follow the Show's Primary Queue, or an explicit ordered list of Queues. */
+/**
+ * Data sources (source mode):
+ * - `primary`: follow the Show's Primary Queue (also after the Primary changes);
+ * - `all`: every Queue of the Show in Show order, including Queues added later (dynamic);
+ * - `selected`: an explicit ordered selection; only that selection is followed.
+ */
 export type BoardSources =
-  { readonly kind: 'primary' } | { readonly kind: 'queues'; readonly queueIds: readonly QueueId[] };
+  | { readonly kind: 'primary' }
+  | { readonly kind: 'all' }
+  | { readonly kind: 'selected'; readonly queueIds: readonly QueueId[] };
 
 export interface BoardPresentation {
   /** Dimmed palette for dark stages. */
@@ -134,7 +141,7 @@ export function presetDefaults(preset: BoardPreset): {
       return {
         name: 'FOH / Production',
         audience: 'production',
-        sources: primary,
+        sources: { kind: 'all' },
         presentation,
         components: complete([
           c('message'),
@@ -211,7 +218,7 @@ export function validateBoard(board: Board, queueIds: readonly QueueId[]): Resul
   ) {
     return err('upcoming must be between 0 and 20');
   }
-  if (board.sources.kind === 'queues') {
+  if (board.sources.kind === 'selected') {
     const ids = board.sources.queueIds;
     if (ids.length === 0) return err('select at least one source queue');
     if (ids.some((id) => !queueIds.includes(id))) return err('unknown source queue');
@@ -220,7 +227,18 @@ export function validateBoard(board: Board, queueIds: readonly QueueId[]): Resul
   return ok({ ...board, name, components: complete([...board.components]) });
 }
 
-/** Queues a Board reads, in order (Primary resolved). */
-export function boardSourceQueues(board: Board, primaryQueueId: QueueId): QueueId[] {
-  return board.sources.kind === 'primary' ? [primaryQueueId] : [...board.sources.queueIds];
+/** Queues a Board reads, in order (Primary and `all` resolved against the current Show). */
+export function boardSourceQueues(
+  board: Board,
+  primaryQueueId: QueueId,
+  allQueueIds: readonly QueueId[],
+): QueueId[] {
+  switch (board.sources.kind) {
+    case 'primary':
+      return [primaryQueueId];
+    case 'all':
+      return [...allQueueIds];
+    case 'selected':
+      return [...board.sources.queueIds];
+  }
 }

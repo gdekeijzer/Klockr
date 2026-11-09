@@ -176,4 +176,5 @@ Not stored: chained planned times, projected times, offsets, statuses, recovery,
 - `boards`: `name`, `audience`, `follow_primary`, `components jsonb`, `presentation jsonb`, `revision`, `updated_at`; checks on preset and audience. Data migration: existing `speaker` Boards become `speaker_confidence` / "Speaker Board" / `stage`; Queues get discipline `Program`.
 - `board_sources (board_id, queue_id, position)` for explicit sources.
 - `item_relations` (source/target item, offset, preserve_offset, active), `queue_suggestions` (pending/accepted/ignored/stale with the target Current at creation) and `messages` (text, audiences, board_ids, priority, expires_at).
+- Migration `0006_board_source_mode`: `boards.source_mode` (`primary | all | selected`, check constraint, default `primary`); existing Boards with `follow_primary = false` become `selected`, all others stay `primary`. `follow_primary` is legacy and kept consistent on write.
 - `saveShowAggregate` writes the full diff (Queues, Groups, Items, timers with per-timer CAS, relations, suggestions, Boards, sources, Messages, locks, unlock requests, audit) in one transaction guarded by `shows.revision`.

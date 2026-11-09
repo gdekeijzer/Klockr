@@ -5,6 +5,7 @@ import type {
   BoardComponentDto,
   BoardConfigDto,
   BoardPresetDto,
+  BoardSourcesDto,
   BoardStateSnapshot,
   ShowStateSnapshot,
 } from '@klockr/contracts';
@@ -246,9 +247,9 @@ function BoardConfig(props: {
   const { board, state, disabled } = props;
   const [name, setName] = useState(board.name);
   const [audience, setAudience] = useState<AudienceDto>(board.audience);
-  const [followPrimary, setFollowPrimary] = useState(board.sources.kind === 'primary');
+  const [sourceMode, setSourceMode] = useState<BoardSourcesDto['kind']>(board.sources.kind);
   const [queueIds, setQueueIds] = useState<readonly string[]>(
-    board.sources.kind === 'queues' ? board.sources.queueIds : [state.show.primaryQueueId],
+    board.sources.kind === 'selected' ? board.sources.queueIds : [state.show.primaryQueueId],
   );
   const [components, setComponents] = useState<readonly BoardComponentDto[]>(board.components);
   const [lowLight, setLowLight] = useState(board.presentation.lowLight);
@@ -280,9 +281,10 @@ function BoardConfig(props: {
               boardId: board.id,
               name,
               audience,
-              sources: followPrimary
-                ? { kind: 'primary' }
-                : { kind: 'queues', queueIds: [...queueIds] },
+              sources:
+                sourceMode === 'selected'
+                  ? { kind: 'selected', queueIds: [...queueIds] }
+                  : { kind: sourceMode },
               components: components.map((c) => ({ ...c })),
               presentation: { lowLight, showTimes },
             },
@@ -320,18 +322,19 @@ function BoardConfig(props: {
         </label>
         <fieldset className={boards.field}>
           <legend className="label">Sources</legend>
-          <label className={styles.checkbox}>
-            <input
-              type="checkbox"
-              checked={followPrimary}
-              aria-label="Follow Primary Queue"
-              onChange={(e) => {
-                setFollowPrimary(e.target.checked);
-              }}
-            />
-            Follow the Primary Queue
-          </label>
-          {!followPrimary &&
+          <select
+            className={styles.input}
+            value={sourceMode}
+            aria-label="Board sources"
+            onChange={(e) => {
+              setSourceMode(e.target.value as BoardSourcesDto['kind']);
+            }}
+          >
+            <option value="primary">Primary Queue (follows Primary changes)</option>
+            <option value="all">All Queues (new Queues appear automatically)</option>
+            <option value="selected">Selected Queues</option>
+          </select>
+          {sourceMode === 'selected' &&
             state.queues.map((q) => (
               <label key={q.id} className={styles.checkbox}>
                 <input
@@ -449,7 +452,9 @@ function BoardConfig(props: {
         <button
           type="submit"
           className={styles.button}
-          disabled={disabled || !name.trim() || (!followPrimary && queueIds.length === 0)}
+          disabled={
+            disabled || !name.trim() || (sourceMode === 'selected' && queueIds.length === 0)
+          }
         >
           Save Board
         </button>

@@ -9,6 +9,7 @@ import {
   createQuickTimer,
   getBoardState,
   getShowState,
+  previewBoard,
   runShowTimerCommand,
   type ShowServiceDeps,
 } from '../show';
@@ -315,17 +316,21 @@ describe('M4 multi-Queue, relations, suggestions, Boards, Messages (application)
         type: 'board.update',
         payload: {
           boardId: productionBoard,
-          sources: { kind: 'queues', queueIds: [p.program, p.audio, p.light] },
+          sources: { kind: 'selected', queueIds: [p.program, p.audio, p.light] },
           name: 'FOH',
         },
       });
       const b = (await show()).boards.find((x) => x.id === productionBoard);
-      expect(b).toMatchObject({ name: 'FOH', audience: 'production', sources: { kind: 'queues' } });
+      expect(b).toMatchObject({
+        name: 'FOH',
+        audience: 'production',
+        sources: { kind: 'selected' },
+      });
       const bad = await run({
         type: 'board.update',
         payload: {
           boardId: productionBoard,
-          sources: { kind: 'queues', queueIds: ['00000000-0000-4000-8000-0000000000ff'] },
+          sources: { kind: 'selected', queueIds: ['00000000-0000-4000-8000-0000000000ff'] },
         },
       });
       expect(!bad.ok && bad.error.code).toBe('validation_failed');
@@ -333,6 +338,31 @@ describe('M4 multi-Queue, relations, suggestions, Boards, Messages (application)
       expect(share.ok && share.value.boardId).toBe(productionBoard);
       await ok({ type: 'board.delete', payload: { boardId: productionBoard } });
       expect((await show()).boards).toHaveLength(1);
+    });
+
+    it('FOH / Production defaults to All Queues (dynamic) until an explicit selection is made', async () => {
+      const p = await production();
+      const foh = await created({ type: 'board.create', payload: { preset: 'production' } });
+      const read = async () => {
+        const r = await previewBoard(showId, foh, owner, deps);
+        if (!r.ok) throw new Error('preview');
+        return r.value.queues.map((q) => q.name);
+      };
+      expect((await show()).boards.find((b) => b.id === foh)?.sources).toEqual({ kind: 'all' });
+      expect(await read()).toEqual(['Program', 'Audio', 'Lighting']);
+      // A Queue added later appears automatically while the mode is `all`.
+      await created({ type: 'queue.create', payload: { name: 'Video' } });
+      expect(await read()).toEqual(['Program', 'Audio', 'Lighting', 'Video']);
+      // After switching to a selection only that selection is followed.
+      await ok({
+        type: 'board.update',
+        payload: { boardId: foh, sources: { kind: 'selected', queueIds: [p.audio, p.light] } },
+      });
+      await created({ type: 'queue.create', payload: { name: 'Stage' } });
+      expect(await read()).toEqual(['Audio', 'Lighting']);
+      // The Speaker Board keeps following the Primary.
+      const speaker = (await show()).boards.find((b) => b.id === speakerBoardId);
+      expect(speaker?.sources).toEqual({ kind: 'primary' });
     });
 
     it('Board projection is scoped server-side: sources, audience visibility, notes, messages', async () => {
@@ -379,7 +409,7 @@ describe('M4 multi-Queue, relations, suggestions, Boards, Messages (application)
         type: 'board.update',
         payload: {
           boardId: foh,
-          sources: { kind: 'queues', queueIds: [p.program, p.audio, p.light] },
+          sources: { kind: 'selected', queueIds: [p.program, p.audio, p.light] },
         },
       });
       const share = await createBoardShare(showId, owner, deps, foh);
@@ -394,6 +424,27 @@ describe('M4 multi-Queue, relations, suggestions, Boards, Messages (application)
       // A Board grant reads only its own Board.
       const other = await getBoardState(BoardId(foh), board, deps);
       expect(!other.ok && other.error.code).toBe('forbidden');
+    });
+
+    it('a hidden Current renders STAND BY: no title, metadata or timer of the hidden item', async () => {
+      await ok({
+        type: 'item.update',
+        payload: { queueItemId: opening, patch: { subtitle: 'Secret subtitle' } },
+      });
+      await ok({
+        type: 'item.setVisibility',
+        payload: { queueItemId: opening, visibility: ['production'] },
+      });
+      const r = await getBoardState(BoardId(speakerBoardId), board, deps);
+      if (!r.ok) throw new Error('board');
+      const q = r.value.queues[0];
+      expect(q?.current).toBeNull();
+      expect(q?.standBy).toBe(true);
+      expect(q?.timers).toEqual([]);
+      expect(q?.growsAfter).toBeNull();
+      const raw = JSON.stringify(r.value);
+      expect(raw).not.toContain(opening);
+      expect(raw).not.toContain('Secret subtitle');
     });
 
     it('notes reach a Board only with a Notes component AND an explicit audience', async () => {
@@ -425,6 +476,35 @@ describe('M4 multi-Queue, relations, suggestions, Boards, Messages (application)
         payload: { boardId: sm, components: components?.map((c) => ({ ...c })) ?? [] },
       });
       expect(await read()).toBe('Headset 3');
+    });
+
+    it('several active Messages are kept; the Board snapshot orders them; clearing reveals the next', async () => {
+      const send = async (text: string, priority: 'normal' | 'urgent') => {
+        clock.advance(1000);
+        return created({ type: 'message.send', payload: { text, audiences: ['stage'], priority } });
+      };
+      await send('WRAP UP', 'normal');
+      const stop = await send('STOP', 'urgent');
+      await send('5 MIN', 'normal');
+      expect((await show()).messages).toHaveLength(3); // not one Message per Board
+      const texts = async () => {
+        const r = await getBoardState(BoardId(speakerBoardId), board, deps);
+        if (!r.ok) throw new Error('board');
+        return r.value.messages.map((m) => m.text);
+      };
+      // urgent first, then the most recent of equal priority
+      expect(await texts()).toEqual(['STOP', '5 MIN', 'WRAP UP']);
+      await ok({ type: 'message.clear', payload: { messageId: stop } });
+      expect(await texts()).toEqual(['5 MIN', 'WRAP UP']);
+      // An expiring urgent Message dominates until it expires; then the next valid one shows.
+      clock.advance(1000);
+      await created({
+        type: 'message.send',
+        payload: { text: 'THANK YOU', audiences: ['stage'], priority: 'urgent', ttlMs: 30_000 },
+      });
+      expect((await texts())[0]).toBe('THANK YOU');
+      clock.advance(31_000);
+      expect(await texts()).toEqual(['5 MIN', 'WRAP UP']);
     });
 
     it('message clear; a board token can never send messages, manage Boards, Queues or relations', async () => {

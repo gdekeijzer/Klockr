@@ -1,5 +1,14 @@
 # Changelog
 
+## M4 review — 2026-11-09 — OPEN_QUESTIONS #43-46 resolved
+
+- #43: a hidden Current renders `STAND BY` on Boards; the projection carries only `standBy` (no title/metadata/timer/warning/timing of the hidden item), the next visible item is never promoted;
+- #44: CONFLICT is a status of the item (dashed amber outline + label, linked time in the tooltip); the engine never projects a linked item more than the tolerance before the end of its predecessor, so no block overlaps a Current item; timeline scale 8 px/min for readable titles;
+- #45: Board source modes `primary | all | selected`; FOH / Production defaults to `all` (dynamic, new Queues appear automatically); Speaker Confidence stays `primary`; migration `0006_board_source_mode` (existing explicit selections become `selected`); Boards page source selector;
+- #46: several active Messages; one dominant Message per Board (priority, then most recent; clear/expiry falls through to the next), `compareMessages`, `dominantMessage`, `selectDominantMessage` (same rule client-side);
+- tests: 335 unit/component, 22 PostgreSQL integration, 10 Playwright E2E (STAND BY, dynamic `all`, multiple Messages and timeline no-overlap asserted); full suite 3× green;
+- docs: OPEN_QUESTIONS #43-46 closed; BOARDS_AUDIENCES, QUEUES_SCHEDULING, DATA_MODEL, API_CONTRACT, PROJECT_STATUS updated.
+
 ## M4 — 2026-11-09 — Boards + Multi-Queue
 
 - domain: `ShowAggregate` as the single consistency boundary (one Show revision for CAS, per-Queue revisions for gating); peer Queues with discipline, position and one Primary; relations with offset, preserve-offset, cycle checks and CONFLICT; multi-Queue schedule engine (`calculateShowSchedule`); suggested follow (pending / accepted / ignored / stale, never auto-follow); `moveItemToQueue`; audiences and item visibility / published notes; Board configuration with 7 presets and a constrained component model; Messages with audiences, priority and TTL; capabilities `queue.create`, `queue.delete`, `relation.manage`, `board.manage`, `message.send`;

@@ -2,27 +2,28 @@
 
 ## Phase
 
-**M4 complete (2026-11-09) — Boards + Multi-Queue**, awaiting review. M3 approved. Workflow: local checks → commit directly on `main` → push → verify CI on `main` (PRs only on explicit request).
+**M4 complete and approved (2026-11-09) — Boards + Multi-Queue.** OPEN_QUESTIONS #43-46 resolved in the review and implemented. Workflow: local checks → commit directly on `main` → push → verify CI on `main` (PRs only on explicit request).
 
 ## M4 delivered
 
 - one `ShowAggregate` per Show (all Queues, relations, suggestions, Boards, Messages, locks) with one Show revision for compare-and-set and per-Queue revisions for gating/conflicts; every change through `mutateShow`
 - multiple peer Queues (Program, Audio, Lighting, …): create, rename, discipline, reorder, make Primary, delete (guarded); own Current per Queue; several timers may run in parallel; changing Current never touches another Queue
-- cross-Queue relations with relative offset (e.g. Headset live −00:30 to Keynote), cycle checks, multi-Queue projection, visible CONFLICT
+- cross-Queue relations with relative offset (e.g. Headset live −00:30 to Keynote), cycle checks, multi-Queue projection, CONFLICT as a status of the item (never projected over its predecessor beyond the tolerance)
 - suggested follow: a pending suggestion per related Queue when Current changes; GO (only sets Current, never starts a timer) / Ignore; stale suggestions are not executable; no auto-follow
 - Move to Queue for safe items (not Current, not running, no same-Queue relation)
 - audiences (stage, production, backstage, public, broadcast), item visibility and explicitly published notes
-- Boards: 7 presets on one generic renderer, constrained configuration (sources, audience, components on/off/size/order, low light), live preview, read-only share link per Board
-- server-side scoped Board projection (sources, audience, enabled components, Messages) — hidden items never reach the display browser
-- Messages to audiences/Boards with priority and expiry; WRAP UP / STOP / 5 MIN / THANK YOU presets
-- Master: multi-Queue overview, List / Timeline (lanes, planned vs projected, LINK/CONFLICT/FIXED/SHIFT, fixed window)
+- Boards: 7 presets on one generic renderer, constrained configuration (source mode `primary` / `all` / `selected`, audience, components on/off/size/order, low light), live preview, read-only share link per Board; FOH / Production defaults to All Queues (dynamic), Speaker Confidence to Primary
+- server-side scoped Board projection (sources, audience, enabled components, Messages) — hidden items never reach the display browser; a hidden Current shows STAND BY
+- Messages to audiences/Boards with priority and expiry; several may be active, a Board shows one dominant Message (priority, then most recent) and falls through to the next on clear/expiry; WRAP UP / STOP / 5 MIN / THANK YOU presets
+- Master: multi-Queue overview, List / Timeline (lanes, planned vs projected, LINK/CONFLICT/FIXED/SHIFT, fixed window; CONFLICT never as an overlapping block)
 - realtime: `show.state` to operators, scoped `board.snapshot` per Board; Boards keep running through an outage and resync
-- persistence: migration `0005_multi_queue_boards`; whole-Show save in one transaction
-- tests: 325 unit/component (domain 159, contracts 19, application 69, ui 18, server 26, worker 2, web 32), 22 PostgreSQL integration (db 21, server 1), 10 Playwright E2E (suite repeated 3× green)
+- persistence: migrations `0005_multi_queue_boards`, `0006_board_source_mode`; whole-Show save in one transaction
+- tests: 335 unit/component (domain 166, contracts 19, application 72, ui 18, server 26, worker 2, web 32), 22 PostgreSQL integration (db 21, server 1), 10 Playwright E2E (suite repeated 3× green)
 
 ## Known limitations after M4
 
-- A hidden Current shows "—" on a Board (OPEN_QUESTIONS #43); timeline conflict blocks may overlap (#44); Production does not default to all Queues (#45); one Message at a time per Board (#46).
+- STAND BY is a fixed text; a per-preset configurable fallback text may follow later.
+- While a Board's Current is hidden, the offset is not extrapolated locally from that item's timer (no timing of the hidden item is sent); it updates with every committed change.
 - Messages can target Boards by id via the API; the Operator UI targets audiences only.
 - No pending/apply step for Sliding shifts or linked shifts (#6); no auto-follow, no hard scheduled start, no automatic recovery (V1 scope).
 - Events/Rooms, devices, accounts, role links and Board link revocation UI are not part of M4.
@@ -175,7 +176,7 @@ OPEN_QUESTIONS #34-37 resolved in the review.
 
 ## Next milestone
 
-**M5 — Event / Room / Device** (see `docs/IMPLEMENTATION_PLAN.md`). Start only on explicit instruction after the M4 review; OPEN_QUESTIONS #38-40 and #43-46 remain open.
+**M5 — Event / Room / Device** (see `docs/IMPLEMENTATION_PLAN.md`). Start only on explicit instruction after the M4 review; OPEN_QUESTIONS #38-40 remain open.
 
 ## Decisions that do not block M5
 
