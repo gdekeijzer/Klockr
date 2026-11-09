@@ -13,7 +13,29 @@ export interface DatabaseHandle {
 export function createDatabase(connectionString: string): DatabaseHandle {
   const pool = new pg.Pool({ connectionString, max: 10 });
   const db = drizzle(pool, { schema });
-  return { db, pool, close: () => pool.end() };
+  // `pool.end()` resolves once the pool has released its clients, before their connections are
+  // actually closed. Track open clients so `close()` returns only when every connection ended
+  // (callers may then safely drop or restart the database).
+  const open = new Set<pg.PoolClient>();
+  pool.on('connect', (client) => {
+    open.add(client);
+    client.once('end', () => {
+      open.delete(client);
+    });
+  });
+  const close = async () => {
+    const closing = [...open].map(
+      (client) =>
+        new Promise<void>((resolve) => {
+          client.once('end', () => {
+            resolve();
+          });
+        }),
+    );
+    await pool.end();
+    await Promise.all(closing);
+  };
+  return { db, pool, close };
 }
 
 /** Lightweight readiness probe. */
