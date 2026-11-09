@@ -64,7 +64,9 @@ describe('server + PostgreSQL (requires PostgreSQL)', () => {
         headers: { authorization: `Bearer ${boardShareToken}` },
       });
       expect(board.status).toBe(200);
-      expect(await board.json()).toMatchObject({ timer: { status: 'running', revision: 1 } });
+      expect(await board.json()).toMatchObject({
+        queues: [{ timers: [{ status: 'running', revision: 1 }] }],
+      });
 
       const socket = second.connect({ role: 'board', boardShareToken });
       expect((await nextEvent(socket, 'board.snapshot')).queues[0]?.timers[0]?.revision).toBe(1);
