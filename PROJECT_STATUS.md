@@ -2,7 +2,7 @@
 
 ## Phase
 
-**M2 complete (2026-11-09) — Queue operations. Awaiting review before M3.** (Branch `feature/m2-queue-operations`.)
+**M2 complete and approved (2026-11-09) — Queue operations.** OPEN_QUESTIONS #34-37 resolved in the review.
 
 ## M2 delivered
 
@@ -22,7 +22,7 @@
 ## Known limitations after M2
 
 - No schedule fields, planned/projected/actual times, ahead/behind or Scheduled start (M3). Only the "On previous END" start mode exists.
-- Notes are operator-only by rule; per-audience visibility (e.g. "Speaker Board hidden") comes with Boards/Audiences (M4). A current item without timer shows its title on the Speaker Board (see OPEN_QUESTIONS #35).
+- Notes are operator-only by rule; per-audience visibility (e.g. "Speaker Board hidden") comes with Boards/Audiences (M4). A current item without timer shows its title on the Speaker Board; the `notes` property never reaches Boards (OPEN_QUESTIONS #35).
 - Tags are stored and editable as text but not used for filtering yet.
 - Group collapse state is per browser and not shared.
 - No locks yet: structural edits during a live show are guarded only by the safety rules (current/running items cannot be deleted) and revisions (M3).
@@ -125,7 +125,7 @@
 
 ## Next milestone
 
-**M3 — Scheduling + Master** (see `ROADMAP.md`). Review M2 (and `OPEN_QUESTIONS.md` #34-37) before starting.
+**M3 — Scheduling + Master** (see `ROADMAP.md`). Start only on explicit instruction.
 
 ## Decisions that do not block M3
 
