@@ -2,6 +2,8 @@ export * from './access';
 export * from './audience';
 export * from './board';
 export * from './clock';
+export * from './device';
+export * from './event';
 export * from './ids';
 export * from './lock';
 export * from './message';

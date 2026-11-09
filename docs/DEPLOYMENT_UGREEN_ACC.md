@@ -163,3 +163,15 @@ docker compose up -d
 ## ACC versus PRD isolation
 
 ACC and PRD never share a PostgreSQL instance or database, persistent storage, credentials or ports. They do share the **images** (same SHA). PRD gets its own Compose project (e.g. `klockr-prd`), its own host directory, its own password and `KLOCKR_PUBLIC_URL=https://klockr.live`. Production promotion is always an explicit, manual step.
+
+## Upgrading ACC to M5
+
+No configuration change and no reset: the Compose file is unchanged.
+
+1. Wait for the GitHub Actions run of the M5 commit (images `latest` + the commit SHA).
+2. In UGREEN Composer, pull the newer images and redeploy the `klockr-acc` project (or pin the M5 SHA).
+3. `migrate` applies `0007_events_rooms_devices` (additive) and exits 0; server, worker and web start afterwards.
+4. Existing M4 Shows stay standalone and keep running timers, Boards, owner cookies and share links.
+5. New routes are served by the existing Cloudflare rules (`/api/v1/*` and `/realtime/*` → server; `/event/*`, `/device` → web). No new tunnel route is needed.
+
+Rehearsed locally: M4 stack (built from `dac40bc`) with a running timer, then the M5 images on the same storage — migration applied, data intact, the M4 Show could join a new Event.

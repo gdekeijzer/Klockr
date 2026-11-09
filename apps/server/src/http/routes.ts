@@ -1,23 +1,24 @@
 import {
-  createBoardShare,
   createQuickTimer,
+  createScopedBoardShare,
   executeShowCommand,
   previewBoard,
   getAuditTrail,
-  getBoardState,
-  getShowState,
+  getShowStateWithContext,
+  readSharedBoard,
   runShowTimerCommand,
+  showContextOf,
   timerCommandFromDto,
   toShowStateSnapshot,
   toTimerSnapshot,
-  type ShowServiceDeps,
+  type PlatformDeps,
 } from '@klockr/application';
 import {
   createQuickTimerRequestSchema,
   idSchema,
   showCommandSchema,
   timerCommandSchema,
-  boardShareRequestSchema,
+  boardShareCreateRequestSchema,
   type AuditListResponse,
   type BoardShareResponse,
   type CreateQuickTimerResponse,
@@ -25,21 +26,22 @@ import {
   type ShowCommandResponse,
   type TimerCommandDto,
 } from '@klockr/contracts';
-import { ANONYMOUS_SHOW_TTL_MS, BoardId, ShowId } from '@klockr/domain';
+import { ANONYMOUS_SHOW_TTL_MS, ShowId } from '@klockr/domain';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { boardFromRequest, ownerCookieName, ownerFromRequest } from './auth';
+import { boardFromRequest, managementFromRequest, ownerCookieName } from './auth';
+import { registerM5Routes } from './m5-routes';
 import { errorBody, httpStatusOf, unauthenticated } from './errors';
 
 export interface ApiOptions {
-  readonly services: ShowServiceDeps;
+  readonly services: PlatformDeps;
   /** Set the Secure attribute on credential cookies (true behind HTTPS). */
   readonly secureCookies: boolean;
 }
 
 const showParams = z.object({ showId: idSchema });
 
-function badRequest(reply: FastifyReply, issues: z.ZodError) {
+export function badRequest(reply: FastifyReply, issues: z.ZodError) {
   return reply.code(400).send({
     error: {
       code: 'validation_failed',
@@ -66,14 +68,12 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
       if (!created.ok)
         return reply.code(httpStatusOf(created.error)).send(errorBody(created.error));
 
-      reply.setCookie(ownerCookieName(created.value.showId), created.value.ownerToken, {
-        httpOnly: true,
-        sameSite: 'strict',
-        secure: options.secureCookies,
-        path: '/',
-        // Outlives the nominal 7-day expiry by a day so management access does not vanish first.
-        maxAge: Math.floor(ANONYMOUS_SHOW_TTL_MS / 1000) + 24 * 60 * 60,
-      });
+      setOwnerCookie(
+        reply,
+        ownerCookieName(created.value.showId),
+        created.value.ownerToken,
+        options,
+      );
       const response: CreateQuickTimerResponse = {
         showId: created.value.showId,
         boardShareToken: created.value.boardShareToken,
@@ -85,9 +85,13 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
   app.get('/api/v1/shows/:showId/state', async (request, reply) => {
     const params = showParams.safeParse(request.params);
     if (!params.success) return badRequest(reply, params.error);
-    const owner = await ownerFromRequest(request, params.data.showId, services);
+    const owner = await managementFromRequest(request, params.data.showId, services);
     if (!owner) return reply.code(401).send(unauthenticated);
-    const state = await getShowState(ShowId(params.data.showId), { actor: owner.actor }, services);
+    const state = await getShowStateWithContext(
+      ShowId(params.data.showId),
+      { actor: owner.actor },
+      services,
+    );
     if (!state.ok) return reply.code(httpStatusOf(state.error)).send(errorBody(state.error));
     return state.value;
   });
@@ -95,7 +99,7 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
   app.post('/api/v1/shows/:showId/commands', async (request, reply) => {
     const params = showParams.safeParse(request.params);
     if (!params.success) return badRequest(reply, params.error);
-    const owner = await ownerFromRequest(request, params.data.showId, services);
+    const owner = await managementFromRequest(request, params.data.showId, services);
     if (!owner) return reply.code(401).send(unauthenticated);
     const command = showCommandSchema.safeParse(request.body);
     if (!command.success) return badRequest(reply, command.error);
@@ -130,7 +134,12 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
     if (!meta)
       return reply.code(404).send(errorBody({ code: 'not_found', message: 'Show not found' }));
     const response: ShowCommandResponse = {
-      state: toShowStateSnapshot(meta, result.value.show, services.clock.now()),
+      state: toShowStateSnapshot(
+        meta,
+        result.value.show,
+        services.clock.now(),
+        await showContextOf(meta, services),
+      ),
       createdId: result.value.createdId,
     };
     return response;
@@ -143,7 +152,7 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
       .object({ limit: z.coerce.number().int().min(1).max(500).default(100) })
       .safeParse(request.query);
     if (!query.success) return badRequest(reply, query.error);
-    const owner = await ownerFromRequest(request, params.data.showId, services);
+    const owner = await managementFromRequest(request, params.data.showId, services);
     if (!owner) return reply.code(401).send(unauthenticated);
     const trail = await getAuditTrail(
       ShowId(params.data.showId),
@@ -168,15 +177,15 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
   app.post('/api/v1/shows/:showId/board-shares', async (request, reply) => {
     const params = showParams.safeParse(request.params);
     if (!params.success) return badRequest(reply, params.error);
-    const owner = await ownerFromRequest(request, params.data.showId, services);
+    const owner = await managementFromRequest(request, params.data.showId, services);
     if (!owner) return reply.code(401).send(unauthenticated);
-    const body = boardShareRequestSchema.safeParse(request.body ?? {});
+    const body = boardShareCreateRequestSchema.safeParse(request.body ?? {});
     if (!body.success) return badRequest(reply, body.error);
-    const share = await createBoardShare(
-      ShowId(params.data.showId),
+    const share = await createScopedBoardShare(
+      { showId: ShowId(params.data.showId), eventId: null },
+      body.data,
       { actor: owner.actor },
       services,
-      body.data.boardId,
     );
     if (!share.ok) return reply.code(httpStatusOf(share.error)).send(errorBody(share.error));
     const response: BoardShareResponse = share.value;
@@ -187,7 +196,7 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
   app.get('/api/v1/shows/:showId/boards/:boardId/preview', async (request, reply) => {
     const params = showParams.extend({ boardId: idSchema }).safeParse(request.params);
     if (!params.success) return badRequest(reply, params.error);
-    const owner = await ownerFromRequest(request, params.data.showId, services);
+    const owner = await managementFromRequest(request, params.data.showId, services);
     if (!owner) return reply.code(401).send(unauthenticated);
     const preview = await previewBoard(
       ShowId(params.data.showId),
@@ -205,13 +214,28 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
     async (request, reply) => {
       const board = await boardFromRequest(request, services);
       if (!board?.grant.boardId) return reply.code(401).send(unauthenticated);
-      const state = await getBoardState(
-        BoardId(board.grant.boardId),
-        { actor: board.actor },
-        services,
-      );
+      const state = await readSharedBoard(board.grant.boardId, { actor: board.actor }, services);
       if (!state.ok) return reply.code(httpStatusOf(state.error)).send(errorBody(state.error));
       return state.value;
     },
   );
+
+  registerM5Routes(app, options);
+}
+
+/** HttpOnly owner credential cookie (Show or Event). */
+export function setOwnerCookie(
+  reply: FastifyReply,
+  name: string,
+  token: string,
+  options: Pick<ApiOptions, 'secureCookies'>,
+): void {
+  reply.setCookie(name, token, {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: options.secureCookies,
+    path: '/',
+    // Outlives the nominal 7-day expiry by a day so management access does not vanish first.
+    maxAge: Math.floor(ANONYMOUS_SHOW_TTL_MS / 1000) + 24 * 60 * 60,
+  });
 }

@@ -189,3 +189,14 @@ Presets (Timer, Speaker, Note, Break) are UI only and all send `item.add`. `GET 
 - `GET /api/v1/shows/:showId/boards/:boardId/preview` (management) returns the same scoped `BoardStateSnapshot` a Board token receives.
 - `GET /api/v1/board/state` (Board token) returns `BoardStateSnapshot { board, version, timeZone, queues[], messages[], serverTime }`.
 - New capabilities: `queue.create`, `queue.delete`, `relation.manage`, `board.manage`, `message.send`. A Board share holds only `board.read`.
+
+## Implemented in M5
+
+- `POST /api/v1/events` (sets the Event owner cookie) · `GET /api/v1/events/:eventId/state` · `POST /api/v1/events/:eventId/commands` (`event.update`, `room.create/update/move/delete`, `show.place`, `show.detach`, `board.create/update/delete` for Event Boards with `room`/`event` sources, `lock.set/release` on event/room) → `{ state: EventStateSnapshot, createdId }`.
+- `POST /api/v1/events/:eventId/shows` (new Show in the Event; sets its own owner cookie) · `POST /api/v1/events/:eventId/shows/attach` (needs Event AND Show owner cookie) · `POST /api/v1/shows/:showId/duplicate` (clean copy; placed in the same Event when the browser manages it).
+- `GET /api/v1/events/:eventId/boards/:boardId/preview`.
+- Devices per scope: `GET|POST /api/v1/{shows|events}/:id/devices` (`device.pair`, `device.rename`, `device.assign`, `device.revoke`, `device.remove`).
+- Pairing (display side, no credential): `POST /api/v1/devices/pairing` → `{ code, pairingSecret, expiresAt }`; `POST /api/v1/devices/pairing/claim` → 202 pending, 200 `{ deviceId, deviceToken }` once, 410 expired/used. Paired display: `GET /api/v1/device/state` (Bearer `kld_…`, 401 when revoked).
+- Share links: `GET /api/v1/{shows|events}/:id/board-shares`, `POST /api/v1/shows/:showId/board-shares` and `POST /api/v1/events/:eventId/board-shares` (`{ boardId?, label? }` → `{ shareId, boardId, boardShareToken }`), `POST …/board-shares/:shareId/revoke`.
+- `GET /api/v1/shows/:showId/state` and command responses carry `show.context` (Event/Room breadcrumb). Show endpoints accept the Show owner cookie OR the owner cookie of the Event the Show is placed in.
+- New capabilities: `event.read`, `event.manage`, `room.manage`, `show.create`, `show.move`, `show.duplicate`, `device.read`, `device.manage`, `device.pair`, `board.share.manage`.

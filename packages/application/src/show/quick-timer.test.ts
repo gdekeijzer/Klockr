@@ -215,7 +215,9 @@ describe('Quick Timer use cases', () => {
       if (!restarted.ok) throw new Error('restart failed');
       expect(deriveTimer(restarted.value.state, clock.now()).remainingMs).toBe(2 * MINUTE_MS);
 
-      expect(events.events.every((e) => e.showId === ShowId(show.showId))).toBe(true);
+      expect(events.events.every((e) => 'showId' in e && e.showId === ShowId(show.showId))).toBe(
+        true,
+      );
       expect(
         events.events.flatMap((e) => (e.type === 'timer.transitioned' ? [e.state.revision] : [])),
       ).toEqual([1, 2, 3, 4, 5, 6]);

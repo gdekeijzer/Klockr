@@ -44,6 +44,10 @@ export const boardSourcesSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('primary') }),
   z.object({ kind: z.literal('all') }),
   z.object({ kind: z.literal('selected'), queueIds: z.array(idSchema).min(1).max(20) }),
+  /** Event Boards only (M5): all Shows of one Room. */
+  z.object({ kind: z.literal('room'), roomId: idSchema }),
+  /** Event Boards only (M5): per Room its current Show. */
+  z.object({ kind: z.literal('event') }),
 ]);
 export type BoardSourcesDto = z.infer<typeof boardSourcesSchema>;
 

@@ -178,3 +178,16 @@ Not stored: chained planned times, projected times, offsets, statuses, recovery,
 - `item_relations` (source/target item, offset, preserve_offset, active), `queue_suggestions` (pending/accepted/ignored/stale with the target Current at creation) and `messages` (text, audiences, board_ids, priority, expires_at).
 - Migration `0006_board_source_mode`: `boards.source_mode` (`primary | all | selected`, check constraint, default `primary`); existing Boards with `follow_primary = false` become `selected`, all others stay `primary`. `follow_primary` is legacy and kept consistent on write.
 - `saveShowAggregate` writes the full diff (Queues, Groups, Items, timers with per-timer CAS, relations, suggestions, Boards, sources, Messages, locks, unlock requests, audit) in one transaction guarded by `shows.revision`.
+
+## Implemented in M5 (migration `0007_events_rooms_devices`)
+
+Additive only (safe for ACC: no drops, no resets; every existing row satisfies the new checks).
+
+- `events` (name, description, starts/ends, time_zone, status, details_revision, revision = Event aggregate CAS) and `rooms` (event_id, name, description, position, status, revision; unique `(event_id, id)`).
+- `shows.event_id` / `room_id` / `event_position` with check "room needs event" and composite FK `(event_id, room_id) → rooms(event_id, id)`; existing Shows keep both null (standalone).
+- `event_locks` (event/room targets).
+- `boards.show_id` nullable + `boards.event_id` + `source_room_id`; check: exactly one owner; source modes add `room`, `event`.
+- `access_grants.show_id` nullable + `event_id` + `label`; kind adds `anonymous_event_owner`; check: exactly one scope.
+- `audit_events.show_id` nullable + `event_id`; check: at least one scope.
+- `devices` (scope event XOR show, name, assigned_board_id → boards ON DELETE SET NULL, unique credential_hash, created/last_seen/revoked, revision) and `device_pairings` (code_hash, unique secret_hash, status pending/paired/claimed, device_id, expires/paired/claimed).
+- Tested: a database migrated to 0006 and filled with M4-shaped rows upgrades to 0007 with Shows standalone, timers/revisions, Boards, grants (owner + share tokens) and audit intact (`packages/db/src/event.integration.test.ts`).

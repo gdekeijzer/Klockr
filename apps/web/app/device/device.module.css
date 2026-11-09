@@ -1,0 +1,51 @@
+.center {
+  grid-row: 1 / -1;
+  align-self: center;
+  display: grid;
+  justify-items: center;
+  gap: 2vh;
+  text-align: center;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--k-text-muted);
+}
+
+.heading {
+  margin: 0;
+  font-size: clamp(28px, 6vw, 96px);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.codeLabel {
+  font-size: clamp(14px, 1.6vw, 24px);
+  color: var(--k-text-secondary);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.code {
+  font-size: clamp(48px, 12vw, 200px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.hint {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--k-text-secondary);
+  font-size: clamp(14px, 1.6vw, 22px);
+}
+
+.again {
+  min-height: 48px;
+  padding: 0 var(--k-spacing-6);
+  background: var(--k-background-control);
+  border: 1px solid var(--k-border-subtle);
+  border-radius: var(--k-radius-control);
+  font-weight: 600;
+  cursor: pointer;
+}

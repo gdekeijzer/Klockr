@@ -1,4 +1,4 @@
-import type { ShowServiceDeps } from '@klockr/application';
+import type { PlatformDeps } from '@klockr/application';
 import type { HealthResponse } from '@klockr/contracts';
 import { systemClock, type Clock } from '@klockr/domain';
 import fastifyCookie from '@fastify/cookie';
@@ -13,7 +13,7 @@ export interface AppOptions {
   /** Readiness probe for PostgreSQL; omitted when no database is configured. */
   readonly checkDatabase?: () => Promise<boolean>;
   /** Application services; when omitted only health endpoints are served. */
-  readonly services?: ShowServiceDeps;
+  readonly services?: PlatformDeps;
   readonly secureCookies?: boolean;
 }
 

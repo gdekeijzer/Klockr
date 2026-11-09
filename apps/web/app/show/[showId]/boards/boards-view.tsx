@@ -5,12 +5,14 @@ import type {
   BoardComponentDto,
   BoardConfigDto,
   BoardPresetDto,
-  BoardSourcesDto,
   BoardStateSnapshot,
   ShowStateSnapshot,
 } from '@klockr/contracts';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { BoardView } from '../../../../components/board/BoardView';
+import { DeviceManager } from '../../../../components/devices/DeviceManager';
+import { ShareManager } from '../../../../components/devices/ShareManager';
 import {
   ApiError,
   createBoardShare,
@@ -171,6 +173,30 @@ export function BoardsView({ showId }: { showId: string }) {
         </section>
 
         <aside className={styles.side}>
+          {state && (
+            <ShareManager
+              scope={{ kind: 'show', id: showId }}
+              boards={state.boards.map((b) => ({ id: b.id, name: b.name }))}
+              disabled={!live}
+            />
+          )}
+          {state?.show.context && (
+            <section className={styles.panel} aria-label="Event Devices">
+              <p className={styles.muted}>
+                This Show is part of an Event; Event-wide Devices are managed there:{' '}
+                <Link className={styles.link} href={`/event/${state.show.context.eventId}/devices`}>
+                  Devices &amp; Boards of {state.show.context.eventName}
+                </Link>
+              </p>
+            </section>
+          )}
+          {state && (
+            <DeviceManager
+              scope={{ kind: 'show', id: showId }}
+              disabled={!live}
+              pushed={rt.devices}
+            />
+          )}
           {board && state && (
             <BoardConfig
               key={`${board.id}:${String(board.revision)}`}
@@ -247,7 +273,11 @@ function BoardConfig(props: {
   const { board, state, disabled } = props;
   const [name, setName] = useState(board.name);
   const [audience, setAudience] = useState<AudienceDto>(board.audience);
-  const [sourceMode, setSourceMode] = useState<BoardSourcesDto['kind']>(board.sources.kind);
+  const [sourceMode, setSourceMode] = useState<'primary' | 'all' | 'selected'>(
+    board.sources.kind === 'selected' || board.sources.kind === 'all'
+      ? board.sources.kind
+      : 'primary',
+  );
   const [queueIds, setQueueIds] = useState<readonly string[]>(
     board.sources.kind === 'selected' ? board.sources.queueIds : [state.show.primaryQueueId],
   );
@@ -284,7 +314,9 @@ function BoardConfig(props: {
               sources:
                 sourceMode === 'selected'
                   ? { kind: 'selected', queueIds: [...queueIds] }
-                  : { kind: sourceMode },
+                  : sourceMode === 'all'
+                    ? { kind: 'all' }
+                    : { kind: 'primary' },
               components: components.map((c) => ({ ...c })),
               presentation: { lowLight, showTimes },
             },
@@ -327,7 +359,7 @@ function BoardConfig(props: {
             value={sourceMode}
             aria-label="Board sources"
             onChange={(e) => {
-              setSourceMode(e.target.value as BoardSourcesDto['kind']);
+              setSourceMode(e.target.value as 'primary' | 'all' | 'selected');
             }}
           >
             <option value="primary">Primary Queue (follows Primary changes)</option>

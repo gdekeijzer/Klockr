@@ -5,6 +5,9 @@ import {
   realtimeEvents,
   type BoardStateSnapshot,
   type ClockAck,
+  type DeviceDisplaySnapshot,
+  type DeviceSnapshot,
+  type EventStateSnapshot,
   type ClientToServerEvents,
   type RealtimeAuth,
   type ServerToClientEvents,
@@ -42,6 +45,8 @@ interface Connection {
   readonly offsetMs: number;
   /** Set when the credential is rejected; reconnecting will not help. */
   readonly denied: boolean;
+  /** M5: the credential was revoked while connected (share link or Device). */
+  readonly revoked: boolean;
 }
 
 /**
@@ -56,6 +61,7 @@ function useSocket(
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const [offsetMs, setOffsetMs] = useState(0);
   const [denied, setDenied] = useState(false);
+  const [revoked, setRevoked] = useState(false);
   const estimator = useRef(new ClockOffsetEstimator());
   const registerRef = useRef(register);
   const authKey = JSON.stringify(auth);
@@ -100,6 +106,10 @@ function useSocket(
       // A server-initiated disconnect is not retried automatically by Socket.IO.
       if (reason === 'io server disconnect') socket.connect();
     });
+    socket.on(realtimeEvents.revoked, () => {
+      setRevoked(true);
+      socket.disconnect();
+    });
     socket.on('connect_error', (error) => {
       if (error.message === 'unauthorized' || error.message === 'invalid_auth') {
         setDenied(true);
@@ -118,11 +128,13 @@ function useSocket(
     };
   }, [authKey]);
 
-  return { status, offsetMs, denied };
+  return { status, offsetMs, denied, revoked };
 }
 
 export interface ShowRealtime extends Connection, ManagementState {
   readonly show: ShowStateSnapshot['show'] | null;
+  /** M5: Device list of this Show's scope, pushed on every Device change (null until then). */
+  readonly devices: DeviceSnapshot[] | null;
   /** Feed an authoritative Show state received via HTTP (command response); revision-gated. */
   readonly applyState: (state: ShowStateSnapshot) => void;
   /** Feed an authoritative timer received via HTTP (command response); revision-gated. */
@@ -132,8 +144,12 @@ export interface ShowRealtime extends Connection, ManagementState {
 /** Operator / Master / Boards admin subscription (owner cookie): the whole Show. */
 export function useShowRealtime(showId: string): ShowRealtime {
   const [state, setState] = useState<ManagementState>(emptyManagementState);
+  const [devices, setDevices] = useState<DeviceSnapshot[] | null>(null);
 
   const connection = useSocket({ role: 'operator', showId }, (socket, onSnapshot) => {
+    socket.on(realtimeEvents.devices, (s) => {
+      setDevices(s.devices);
+    });
     socket.on(realtimeEvents.showSnapshot, (s) => {
       setState((current) => applyShowState(current, s));
       onSnapshot(s.serverTime);
@@ -153,7 +169,14 @@ export function useShowRealtime(showId: string): ShowRealtime {
     setState((current) => applyTimerUpdate(current, timer));
   }, []);
 
-  return { ...connection, ...state, show: state.state?.show ?? null, applyState, applyTimer };
+  return {
+    ...connection,
+    ...state,
+    show: state.state?.show ?? null,
+    devices,
+    applyState,
+    applyTimer,
+  };
 }
 
 export type BoardRealtime = Connection & BoardState;
@@ -171,4 +194,63 @@ export function useBoardRealtime(token: string): BoardRealtime {
     });
   });
   return { ...connection, ...state };
+}
+
+export interface EventRealtime extends Connection {
+  readonly state: EventStateSnapshot | null;
+  /** Feed an authoritative Event state received via HTTP; newer server time wins. */
+  readonly applyState: (state: EventStateSnapshot) => void;
+}
+
+/** M5: Event Dashboard / Room View / Devices subscription (Event owner cookie). */
+export function useEventRealtime(eventId: string): EventRealtime {
+  const [state, setState] = useState<EventStateSnapshot | null>(null);
+  const apply = useCallback((s: EventStateSnapshot) => {
+    setState((current) => (current && current.serverTime > s.serverTime ? current : s));
+  }, []);
+  const connection = useSocket({ role: 'event', eventId }, (socket, onSnapshot) => {
+    socket.on(realtimeEvents.event, (s) => {
+      apply(s);
+      onSnapshot(s.serverTime);
+    });
+  });
+  return { ...connection, state, applyState: apply };
+}
+
+export interface DeviceRealtime extends Connection, BoardState {
+  readonly device: DeviceDisplaySnapshot['device'] | null;
+  /** True when the Device is paired but has no Board assigned (yet). */
+  readonly unassigned: boolean;
+}
+
+/**
+ * M5: paired Device display. Same Board projections and renderer as a share link; the Device
+ * only adds identity and (re)assignment: a new `device.snapshot` replaces the Board.
+ */
+export function useDeviceRealtime(deviceToken: string): DeviceRealtime {
+  const [state, setState] = useState<BoardState>(emptyBoardState);
+  const [device, setDevice] = useState<DeviceDisplaySnapshot['device'] | null>(null);
+  const [unassigned, setUnassigned] = useState(false);
+  const connection = useSocket({ role: 'device', deviceToken }, (socket, onSnapshot) => {
+    socket.on(realtimeEvents.device, (s) => {
+      setDevice(s.device);
+      setUnassigned(s.board === null);
+      setState((current) =>
+        s.board === null
+          ? emptyBoardState
+          : current.board?.board.id === s.board.board.id
+            ? applyBoardSnapshot(current, s.board)
+            : applyBoardSnapshot(emptyBoardState, s.board),
+      );
+      onSnapshot(s.serverTime);
+    });
+    socket.on(realtimeEvents.boardSnapshot, (s: BoardStateSnapshot) => {
+      setState((current) =>
+        current.board && current.board.board.id !== s.board.id
+          ? current
+          : applyBoardSnapshot(current, s),
+      );
+    });
+  });
+  return { ...connection, ...state, device, unassigned };
 }

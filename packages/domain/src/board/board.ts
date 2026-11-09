@@ -1,5 +1,5 @@
 import type { Audience } from '../audience';
-import type { BoardId, QueueId, ShowId } from '../ids';
+import type { BoardId, EventId, QueueId, RoomId, ShowId } from '../ids';
 import { err, ok, type Result } from '../result';
 import type { EpochMs } from '../time';
 
@@ -55,7 +55,15 @@ export interface BoardComponent {
 export type BoardSources =
   | { readonly kind: 'primary' }
   | { readonly kind: 'all' }
-  | { readonly kind: 'selected'; readonly queueIds: readonly QueueId[] };
+  | { readonly kind: 'selected'; readonly queueIds: readonly QueueId[] }
+  /** Event Boards only (M5): every Show of one Room (Room Agenda). */
+  | { readonly kind: 'room'; readonly roomId: RoomId }
+  /** Event Boards only (M5): per Room its current Show, plus Event Shows without Room. */
+  | { readonly kind: 'event' };
+
+/** Source modes a Show-owned Board may use; `room`/`event` need an Event-owned Board. */
+export const SHOW_SOURCE_KINDS = ['primary', 'all', 'selected'] as const;
+export const EVENT_SOURCE_KINDS = ['room', 'event'] as const;
 
 export interface BoardPresentation {
   /** Dimmed palette for dark stages. */
@@ -66,7 +74,12 @@ export interface BoardPresentation {
 
 export interface Board {
   readonly id: BoardId;
-  readonly showId: ShowId;
+  /**
+   * Owner: a Show (Show Boards, M1-M4) XOR an Event (Event/Room Boards, M5). The same Board
+   * object and renderer; only the available source modes differ.
+   */
+  readonly showId: ShowId | null;
+  readonly eventId: EventId | null;
   readonly name: string;
   readonly preset: BoardPreset;
   readonly audience: Audience;
@@ -205,8 +218,26 @@ export interface BoardPatch {
 }
 
 /** Validate a configuration: known components exactly once, sane limits, existing Queues. */
-export function validateBoard(board: Board, queueIds: readonly QueueId[]): Result<Board, string> {
+export function validateBoard(
+  board: Board,
+  queueIds: readonly QueueId[],
+  roomIds: readonly string[] = [],
+): Result<Board, string> {
   const name = board.name.trim();
+  if ((board.showId === null) === (board.eventId === null)) {
+    return err('a Board belongs to exactly one Show or one Event');
+  }
+  const allowed: readonly string[] = board.showId !== null ? SHOW_SOURCE_KINDS : EVENT_SOURCE_KINDS;
+  if (!allowed.includes(board.sources.kind)) {
+    return err(
+      board.showId !== null
+        ? 'a Show Board reads its own Queues (primary, all or selected)'
+        : 'an Event Board reads a Room or the whole Event',
+    );
+  }
+  if (board.sources.kind === 'room' && !roomIds.includes(board.sources.roomId)) {
+    return err('unknown source room');
+  }
   if (name.length === 0 || name.length > 100) return err('board name must be 1-100 characters');
   const kinds = board.components.map((x) => x.kind);
   if (new Set(kinds).size !== kinds.length) return err('each component may appear only once');
@@ -240,5 +271,9 @@ export function boardSourceQueues(
       return [...allQueueIds];
     case 'selected':
       return [...board.sources.queueIds];
+    case 'room':
+    case 'event':
+      // Event-level sources are resolved over Shows, not over Queues of one Show.
+      return [];
   }
 }

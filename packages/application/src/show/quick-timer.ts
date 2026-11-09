@@ -8,6 +8,7 @@ import {
   QueueItemId,
   ShowId,
   type AccessGrant,
+  type EventId,
   type Clock,
   type GrantKind,
   type TimerState,
@@ -57,18 +58,29 @@ export interface CreatedQuickTimer {
   readonly boardShareToken: string;
 }
 
-function newGrant(
-  deps: ShowServiceDeps,
+const TOKEN_KIND = {
+  anonymous_owner: 'owner',
+  anonymous_event_owner: 'event',
+  board_share: 'board',
+} as const;
+
+/** New grant record + its secret (returned once; only the hash is persisted). */
+export function newGrant(
+  deps: Pick<ShowServiceDeps, 'tokens' | 'ids' | 'clock'>,
   kind: GrantKind,
-  showId: ShowId,
+  scope: ShowId | { readonly showId: ShowId | null; readonly eventId: EventId | null },
   boardId: BoardId | null,
+  label: string | null = null,
 ): { record: NewGrantRecord; token: string } {
-  const issued = deps.tokens.issue(kind === 'anonymous_owner' ? 'owner' : 'board');
+  const issued = deps.tokens.issue(TOKEN_KIND[kind]);
+  const { showId, eventId } = typeof scope === 'string' ? { showId: scope, eventId: null } : scope;
   const grant: AccessGrant = {
     id: GrantId(deps.ids.uuid()),
     kind,
     showId,
+    eventId,
     boardId,
+    label,
     createdAt: deps.clock.now(),
     // Grants live as long as the Show; anonymous cleanup (worker) removes them with it.
     expiresAt: null,
@@ -132,7 +144,7 @@ export async function createBoardShare(
   context: CommandContext,
   deps: ShowServiceDeps,
   boardId?: string,
-): Promise<CommandResult<{ boardId: BoardId; boardShareToken: string }>> {
+): Promise<CommandResult<{ shareId: string; boardId: BoardId; boardShareToken: string }>> {
   if (!(await deps.authorizer.can(context.actor, 'board.share', { kind: 'show', id: showId }))) {
     return appError('forbidden', 'Not permitted to share Boards of this Show');
   }
@@ -141,7 +153,7 @@ export async function createBoardShare(
   if (!board) return appError('not_found', 'Board not found');
   const share = newGrant(deps, 'board_share', showId, board.id);
   await deps.grants.create(share.record);
-  return ok({ boardId: board.id, boardShareToken: share.token });
+  return ok({ shareId: share.record.grant.id, boardId: board.id, boardShareToken: share.token });
 }
 
 /** Management projection of the whole Show (Operator / Master / Boards admin). */

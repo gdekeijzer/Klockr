@@ -1,4 +1,4 @@
-import type { BoardId, QueueId, QueueItemId, ShowId } from '../ids';
+import type { BoardId, EventId, QueueId, QueueItemId, RoomId, ShowId } from '../ids';
 import { err, ok, type Result } from '../result';
 import type { DurationMs, EpochMs } from '../time';
 import { presetDefaults, type Board } from '../board';
@@ -31,6 +31,9 @@ export interface Show {
   readonly warning: TimerThresholds;
   /** Schedule settings: timing mode default, timezone, show date, tolerance. */
   readonly schedule: ShowSchedule;
+  /** M5: optional Event (and Room) the Show is placed in; null = standalone. */
+  readonly eventId: EventId | null;
+  readonly roomId: RoomId | null;
 }
 
 export interface QuickTimerShow {
@@ -70,6 +73,8 @@ export function createQuickTimerShow(
       expiresAt: now + ANONYMOUS_SHOW_TTL_MS,
       warning: DEFAULT_TIMER_THRESHOLDS,
       schedule: { ...DEFAULT_SHOW_SCHEDULE, ...schedule },
+      eventId: null,
+      roomId: null,
     },
     queue: {
       id: ids.queueId,
@@ -118,6 +123,7 @@ function speakerBoard(ids: QuickTimerIds, now: EpochMs): Board {
   return {
     id: ids.boardId,
     showId: ids.showId,
+    eventId: null,
     name: 'Speaker Board',
     preset: 'speaker_confidence',
     audience: defaults.audience,

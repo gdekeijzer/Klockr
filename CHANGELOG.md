@@ -1,5 +1,16 @@
 # Changelog
 
+## M5 — 2026-11-09 — Events, Rooms & Devices
+
+- domain: `EventAggregate` (Event, Rooms, Show placement, Event Boards, Event/Room locks) with pure operations; `duplicateShow` (clean/idle copy); Devices and pairing sessions (`createDevice`, `assignBoard`, `revokeDevice`, `deviceStatus`, one-time short-lived codes); Board ownership Show XOR Event with `room`/`event` sources; grants with Event scope (`anonymous_event_owner`) and M5 capabilities;
+- application: `executeEventCommand` (single Event mutation path: capability, idempotency, revision, Event/Room/Show lock gate, audited override, atomic save, `event.changed`), Show creation/attach/duplicate, Event projections (dashboard summaries, Room/Central Agenda Boards), Device pairing/management/display, Board share list/create/revoke;
+- contracts: Event/Room/placement/Board commands, `EventStateSnapshot`, Device and pairing DTOs, share management, realtime `event.state`, `device.snapshot`, `devices.state`, `access.revoked`; `show.context` breadcrumb;
+- db: migration `0007_events_rooms_devices` (additive; composite FK keeps Rooms inside their Event), repositories for Events, Devices, pairing, shares; M4 → M5 upgrade test;
+- server: Event/Device/pairing/share routes, Event-cookie access to placed Shows, realtime roles `event` and `device`, live Device re-routing and revocation cut-off, sparse presence;
+- web: Event Dashboard, Room View, Devices & Boards page, `/device` pairing/display, New Event, share-link and Device management on the Show Boards page, breadcrumb in Show views, revoked share state;
+- tests: 370 unit/component, 25 PostgreSQL integration, 13 Playwright E2E (suite 3× green); local Docker build and ACC upgrade rehearsal (M4 images with data → M5 images);
+- docs: ADR-0011; M5 sections in EVENTS_ROOMS_MASTER, DEVICES_SHARING, DATA_MODEL, API_CONTRACT, REALTIME_OFFLINE, SECURITY_MODEL, DEPLOYMENT_UGREEN_ACC; OPEN_QUESTIONS #47-50.
+
 ## Deployment slice — 2026-11-09 — containers, GHCR, UGREEN ACC
 
 - images: `apps/{web,server,worker}/Dockerfile` (Node 24 Alpine, pnpm 12, multi-stage, non-root, OCI labels, Node-native healthchecks); `.dockerignore`; Next.js `standalone` output for container builds only (`KLOCKR_STANDALONE=1`) with the Docker-internal rewrite fallback `KLOCKR_SERVER_URL=http://server:4000`; turbo build env declares both;

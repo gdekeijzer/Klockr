@@ -3,7 +3,10 @@ import {
   type AppError,
   type AuditRecord,
   type AuditRepository,
+  type DeviceRepository,
+  type EventRepository,
   type GrantRepository,
+  type OwnerScope,
   type IdempotencyStore,
   type NewGrantRecord,
   type ShowRepository,
@@ -13,8 +16,18 @@ import {
 } from '@klockr/application';
 import {
   BoardId,
+  DeviceId,
   err,
+  EventId,
   GrantId,
+  RoomId,
+  type Device,
+  type EventAggregate,
+  type EventLock,
+  type EventStatus,
+  type PairingSession,
+  type Room,
+  type RoomStatus,
   GroupId,
   ok,
   QueueId,
@@ -51,13 +64,18 @@ import {
   type TimerStatus,
   type TimerThresholds,
 } from '@klockr/domain';
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm';
 import type { Database } from './client';
 import {
   accessGrants,
   auditEvents,
   boardSources,
   boards,
+  devicePairings,
+  devices,
+  eventLocks,
+  events,
+  rooms,
   itemRelations,
   messages,
   queueSuggestions,
@@ -71,6 +89,8 @@ import {
   shows,
   type ThresholdRuleJson,
 } from './schema';
+
+type Tx = Parameters<Parameters<Database['transaction']>[0]>[0];
 
 const toDate = (ms: EpochMs): Date => new Date(ms);
 const toDateOrNull = (ms: EpochMs | null): Date | null => (ms === null ? null : new Date(ms));
@@ -210,8 +230,10 @@ function grantFromRow(row: GrantRow): AccessGrant {
   return {
     id: GrantId(row.id),
     kind: row.kind as GrantKind,
-    showId: ShowId(row.showId),
+    showId: row.showId === null ? null : ShowId(row.showId),
+    eventId: row.eventId === null ? null : EventId(row.eventId),
     boardId: row.boardId === null ? null : BoardId(row.boardId),
+    label: row.label,
     createdAt: toMs(row.createdAt),
     expiresAt: toMsOrNull(row.expiresAt),
     revokedAt: toMsOrNull(row.revokedAt),
@@ -224,7 +246,9 @@ function grantColumns(record: NewGrantRecord) {
     id: grant.id,
     kind: grant.kind,
     showId: grant.showId,
+    eventId: grant.eventId,
     boardId: grant.boardId,
+    label: grant.label,
     tokenHash: record.tokenHash,
     createdAt: toDate(grant.createdAt),
     expiresAt: toDateOrNull(grant.expiresAt),
@@ -243,6 +267,8 @@ function showFromRow(row: ShowRow): Show {
     expiresAt: toMs(row.expiresAt),
     warning: ruleFromJson(row.warningRule),
     schedule: scheduleFromRow(row),
+    eventId: row.eventId === null ? null : EventId(row.eventId),
+    roomId: row.roomId === null ? null : RoomId(row.roomId),
   };
 }
 
@@ -385,7 +411,8 @@ function boardFromRow(
   const defaults = presetDefaults(preset);
   return {
     id: BoardId(row.id),
-    showId: ShowId(row.showId),
+    showId: row.showId === null ? null : ShowId(row.showId),
+    eventId: row.eventId === null ? null : EventId(row.eventId),
     name: row.name,
     preset,
     audience: row.audience as Audience,
@@ -397,7 +424,11 @@ function boardFromRow(
               .sort((a, b) => a.position - b.position)
               .map((s) => QueueId(s.queueId)),
           }
-        : { kind: row.sourceMode === 'all' ? 'all' : 'primary' },
+        : row.sourceMode === 'room' && row.sourceRoomId !== null
+          ? { kind: 'room', roomId: RoomId(row.sourceRoomId) }
+          : row.sourceMode === 'event'
+            ? { kind: 'event' }
+            : { kind: row.sourceMode === 'all' ? 'all' : 'primary' },
     // An empty list (M1 boards before M4) means: the preset's default components.
     components:
       row.components.length > 0
@@ -414,6 +445,8 @@ function boardColumns(b: Board) {
   return {
     id: b.id,
     showId: b.showId,
+    eventId: b.eventId,
+    sourceRoomId: b.sources.kind === 'room' ? b.sources.roomId : null,
     preset: b.preset,
     name: b.name,
     audience: b.audience,
@@ -454,10 +487,577 @@ function messageColumns(showId: string, m: Message) {
   };
 }
 
+function roomFromRow(row: typeof rooms.$inferSelect): Room {
+  return {
+    id: RoomId(row.id),
+    eventId: EventId(row.eventId),
+    name: row.name,
+    description: row.description,
+    position: row.position,
+    status: row.status as RoomStatus,
+    createdAt: toMs(row.createdAt),
+    updatedAt: toMs(row.updatedAt),
+    revision: row.revision,
+  };
+}
+
+function roomColumns(r: Room) {
+  return {
+    id: r.id,
+    eventId: r.eventId,
+    name: r.name,
+    description: r.description,
+    position: r.position,
+    status: r.status,
+    createdAt: toDate(r.createdAt),
+    updatedAt: toDate(r.updatedAt),
+    revision: r.revision,
+  };
+}
+
+function deviceFromRow(row: typeof devices.$inferSelect): Device {
+  return {
+    id: DeviceId(row.id),
+    scope: {
+      eventId: row.eventId === null ? null : EventId(row.eventId),
+      showId: row.showId === null ? null : ShowId(row.showId),
+    },
+    name: row.name,
+    assignedBoardId: row.assignedBoardId === null ? null : BoardId(row.assignedBoardId),
+    createdAt: toMs(row.createdAt),
+    lastSeenAt: toMsOrNull(row.lastSeenAt),
+    revokedAt: toMsOrNull(row.revokedAt),
+    revision: row.revision,
+  };
+}
+
+function pairingFromRow(row: typeof devicePairings.$inferSelect): PairingSession {
+  return {
+    id: row.id,
+    codeHash: row.codeHash,
+    secretHash: row.secretHash,
+    status: row.status as PairingSession['status'],
+    deviceId: row.deviceId === null ? null : DeviceId(row.deviceId),
+    createdAt: toMs(row.createdAt),
+    expiresAt: toMs(row.expiresAt),
+    pairedAt: toMsOrNull(row.pairedAt),
+    claimedAt: toMsOrNull(row.claimedAt),
+  };
+}
+
+function auditRows(audit: readonly AuditRecord[]) {
+  return audit.map((a) => ({
+    id: a.id,
+    showId: a.showId,
+    eventId: a.eventId ?? null,
+    at: toDate(a.at),
+    actorKind: a.actor.kind,
+    actorId: a.actor.id,
+    action: a.action,
+    resourceKind: a.resource.kind,
+    resourceId: a.resource.id,
+    details: { ...a.details },
+  }));
+}
+
+const emptyLike = (next: ShowAggregate): ShowAggregate => ({
+  ...next,
+  queues: [],
+  locks: [],
+  unlockRequests: [],
+  relations: [],
+  suggestions: [],
+  boards: [],
+  messages: [],
+});
+
 export class PgShowStore
-  implements ShowRepository, ShowStateRepository, TimerRepository, GrantRepository, AuditRepository
+  implements
+    ShowRepository,
+    ShowStateRepository,
+    TimerRepository,
+    GrantRepository,
+    AuditRepository,
+    EventRepository,
+    DeviceRepository
 {
   constructor(private readonly db: Database) {}
+
+  /** M5: a complete new Show (Show in Event, duplicate) with grants and audit, atomically. */
+  async createShow(
+    show: Show,
+    aggregate: ShowAggregate,
+    grants: readonly NewGrantRecord[],
+    audit: readonly AuditRecord[] = [],
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.insert(shows).values({
+        id: show.id,
+        title: show.title,
+        ownership: show.ownership,
+        primaryQueueId: show.primaryQueueId,
+        createdAt: toDate(show.createdAt),
+        lastActiveAt: toDate(show.lastActiveAt),
+        expiresAt: toDate(show.expiresAt),
+        warningRule: ruleToJson(aggregate.showWarning),
+        ...scheduleColumns(aggregate.showSchedule),
+        revision: aggregate.revision,
+      });
+      await this.#writeShow(tx, emptyLike(aggregate), aggregate, []);
+      if (grants.length > 0) await tx.insert(accessGrants).values(grants.map(grantColumns));
+      if (audit.length > 0) await tx.insert(auditEvents).values(auditRows(audit));
+    });
+  }
+
+  async eventIdOfShow(showId: ShowId): Promise<EventId | null> {
+    const [row] = await this.db
+      .select({ eventId: shows.eventId })
+      .from(shows)
+      .where(eq(shows.id, showId))
+      .limit(1);
+    return row?.eventId ? EventId(row.eventId) : null;
+  }
+
+  async scopeOfBoard(boardId: BoardId): Promise<OwnerScope | null> {
+    const [row] = await this.db
+      .select({ showId: boards.showId, eventId: boards.eventId, showEventId: shows.eventId })
+      .from(boards)
+      .leftJoin(shows, eq(shows.id, boards.showId))
+      .where(eq(boards.id, boardId))
+      .limit(1);
+    if (!row) return null;
+    if (row.showId !== null) {
+      return {
+        showId: ShowId(row.showId),
+        eventId: row.showEventId === null ? null : EventId(row.showEventId),
+      };
+    }
+    return row.eventId === null ? null : { showId: null, eventId: EventId(row.eventId) };
+  }
+
+  async scopeOfDevice(deviceId: DeviceId): Promise<OwnerScope | null> {
+    const [row] = await this.db
+      .select({ showId: devices.showId, eventId: devices.eventId, showEventId: shows.eventId })
+      .from(devices)
+      .leftJoin(shows, eq(shows.id, devices.showId))
+      .where(eq(devices.id, deviceId))
+      .limit(1);
+    if (!row) return null;
+    if (row.showId !== null) {
+      return {
+        showId: ShowId(row.showId),
+        eventId: row.showEventId === null ? null : EventId(row.showEventId),
+      };
+    }
+    return { showId: null, eventId: row.eventId === null ? null : EventId(row.eventId) };
+  }
+
+  async listBoardShares(scope: OwnerScope): Promise<readonly AccessGrant[]> {
+    const rows = await this.db
+      .select()
+      .from(accessGrants)
+      .where(
+        and(
+          eq(accessGrants.kind, 'board_share'),
+          scope.showId !== null
+            ? eq(accessGrants.showId, scope.showId)
+            : eq(accessGrants.eventId, scope.eventId ?? ''),
+        ),
+      )
+      .orderBy(asc(accessGrants.createdAt));
+    return rows.map(grantFromRow);
+  }
+
+  async revokeGrant(id: GrantId, at: EpochMs, audit: readonly AuditRecord[] = []): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(accessGrants)
+        .set({ revokedAt: toDate(at) })
+        .where(and(eq(accessGrants.id, id), isNull(accessGrants.revokedAt)));
+      if (audit.length > 0) await tx.insert(auditEvents).values(auditRows(audit));
+    });
+  }
+
+  async createWithAudit(record: NewGrantRecord, audit: readonly AuditRecord[]): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.insert(accessGrants).values(grantColumns(record));
+      if (audit.length > 0) await tx.insert(auditEvents).values(auditRows(audit));
+    });
+  }
+
+  // --- Events (M5) ------------------------------------------------------------------------------
+
+  async createEvent(agg: EventAggregate, grants: readonly NewGrantRecord[]): Promise<void> {
+    const e = agg.event;
+    await this.db.transaction(async (tx) => {
+      await tx.insert(events).values({
+        id: e.id,
+        name: e.name,
+        description: e.description,
+        startsAt: toDateOrNull(e.startsAt),
+        endsAt: toDateOrNull(e.endsAt),
+        timeZone: e.timeZone,
+        status: e.status,
+        createdAt: toDate(e.createdAt),
+        updatedAt: toDate(e.updatedAt),
+        detailsRevision: e.revision,
+        revision: agg.revision,
+      });
+      if (agg.rooms.length > 0) await tx.insert(rooms).values(agg.rooms.map(roomColumns));
+      if (grants.length > 0) await tx.insert(accessGrants).values(grants.map(grantColumns));
+    });
+  }
+
+  async loadEvent(eventId: EventId): Promise<EventAggregate | null> {
+    const [row] = await this.db.select().from(events).where(eq(events.id, eventId)).limit(1);
+    if (!row) return null;
+    const [roomRows, showRows, boardRows, lockRows] = await Promise.all([
+      this.db.select().from(rooms).where(eq(rooms.eventId, eventId)).orderBy(asc(rooms.position)),
+      this.db
+        .select({ id: shows.id, roomId: shows.roomId, position: shows.eventPosition })
+        .from(shows)
+        .where(eq(shows.eventId, eventId)),
+      this.db
+        .select()
+        .from(boards)
+        .where(eq(boards.eventId, eventId))
+        .orderBy(asc(boards.createdAt)),
+      this.db.select().from(eventLocks).where(eq(eventLocks.eventId, eventId)),
+    ]);
+    return {
+      event: {
+        id: EventId(row.id),
+        name: row.name,
+        description: row.description,
+        startsAt: toMsOrNull(row.startsAt),
+        endsAt: toMsOrNull(row.endsAt),
+        timeZone: row.timeZone,
+        status: row.status as EventStatus,
+        createdAt: toMs(row.createdAt),
+        updatedAt: toMs(row.updatedAt),
+        revision: row.detailsRevision,
+      },
+      rooms: roomRows.map(roomFromRow),
+      shows: showRows.map((s) => ({
+        showId: ShowId(s.id),
+        roomId: s.roomId === null ? null : RoomId(s.roomId),
+        position: s.position,
+      })),
+      boards: boardRows.map((b) => boardFromRow(b, [])),
+      locks: lockRows.map((l): EventLock => ({
+        id: l.id,
+        target: { kind: l.targetKind as 'event' | 'room', id: l.targetId },
+        lockedAt: toMs(l.lockedAt),
+        lockedBy: { kind: l.lockedByKind, id: l.lockedById },
+      })),
+      revision: row.revision,
+    };
+  }
+
+  /**
+   * One transaction: compare-and-set on the Event revision, then Event fields, Rooms, Show
+   * placement (on the Shows), Event Boards, Event/Room locks and audit. Room rows are written
+   * before placement and deleted after it (composite FK Show -> Room of the same Event).
+   */
+  async saveEvent(
+    prev: EventAggregate,
+    next: EventAggregate,
+    audit: readonly AuditRecord[] = [],
+  ): Promise<Result<void, AppError>> {
+    const e = next.event;
+    try {
+      await this.db.transaction(async (tx) => {
+        const claimed = await tx
+          .update(events)
+          .set({
+            name: e.name,
+            description: e.description,
+            startsAt: toDateOrNull(e.startsAt),
+            endsAt: toDateOrNull(e.endsAt),
+            timeZone: e.timeZone,
+            status: e.status,
+            updatedAt: toDate(e.updatedAt),
+            detailsRevision: e.revision,
+            revision: next.revision,
+          })
+          .where(and(eq(events.id, e.id), eq(events.revision, prev.revision)))
+          .returning({ id: events.id });
+        if (claimed.length === 0) throw new RevisionConflict();
+
+        const prevRooms = new Map(prev.rooms.map((r) => [r.id, r]));
+        for (const r of next.rooms) {
+          const before = prevRooms.get(r.id);
+          if (!before) await tx.insert(rooms).values(roomColumns(r));
+          else if (before !== r)
+            await tx.update(rooms).set(roomColumns(r)).where(eq(rooms.id, r.id));
+        }
+
+        const nextShowIds = next.shows.map((p) => p.showId);
+        const prevPlacements = new Map(prev.shows.map((p) => [p.showId, p]));
+        const removed = prev.shows
+          .filter((p) => !nextShowIds.includes(p.showId))
+          .map((p) => p.showId);
+        if (removed.length > 0) {
+          await tx
+            .update(shows)
+            .set({ eventId: null, roomId: null, eventPosition: 0 })
+            .where(and(inArray(shows.id, removed), eq(shows.eventId, e.id)));
+        }
+        for (const p of next.shows) {
+          const before = prevPlacements.get(p.showId);
+          if (before?.roomId === p.roomId && before.position === p.position) continue;
+          const updated = await tx
+            .update(shows)
+            .set({ eventId: e.id, roomId: p.roomId, eventPosition: p.position })
+            .where(
+              before
+                ? and(eq(shows.id, p.showId), eq(shows.eventId, e.id))
+                : and(eq(shows.id, p.showId), isNull(shows.eventId)),
+            )
+            .returning({ id: shows.id });
+          // A Show that meanwhile joined another Event (or disappeared) is a conflict.
+          if (updated.length === 0) throw new RevisionConflict();
+        }
+
+        const prevBoards = new Map(prev.boards.map((b) => [b.id, b]));
+        for (const b of next.boards) {
+          const before = prevBoards.get(b.id);
+          if (!before) await tx.insert(boards).values(boardColumns(b));
+          else if (before !== b)
+            await tx.update(boards).set(boardColumns(b)).where(eq(boards.id, b.id));
+        }
+        const keptBoards = next.boards.map((b) => b.id);
+        const removedBoards = prev.boards
+          .filter((b) => !keptBoards.includes(b.id))
+          .map((b) => b.id);
+        if (removedBoards.length > 0)
+          await tx.delete(boards).where(inArray(boards.id, removedBoards));
+
+        const keptLocks = next.locks.map((l) => l.id);
+        if (prev.locks.some((l) => !keptLocks.includes(l.id))) {
+          await tx
+            .delete(eventLocks)
+            .where(
+              keptLocks.length > 0
+                ? and(eq(eventLocks.eventId, e.id), notInArray(eventLocks.id, keptLocks))
+                : eq(eventLocks.eventId, e.id),
+            );
+        }
+        const prevLockIds = prev.locks.map((l) => l.id);
+        const newLocks = next.locks.filter((l) => !prevLockIds.includes(l.id));
+        if (newLocks.length > 0) {
+          await tx.insert(eventLocks).values(
+            newLocks.map((l) => ({
+              id: l.id,
+              eventId: e.id,
+              targetKind: l.target.kind,
+              targetId: l.target.id,
+              lockedAt: toDate(l.lockedAt),
+              lockedByKind: l.lockedBy.kind,
+              lockedById: l.lockedBy.id,
+            })),
+          );
+        }
+
+        const keptRooms = next.rooms.map((r) => r.id);
+        const removedRooms = prev.rooms.filter((r) => !keptRooms.includes(r.id)).map((r) => r.id);
+        if (removedRooms.length > 0) await tx.delete(rooms).where(inArray(rooms.id, removedRooms));
+
+        if (audit.length > 0) await tx.insert(auditEvents).values(auditRows(audit));
+      });
+      return ok(undefined);
+    } catch (error) {
+      if (error instanceof RevisionConflict) {
+        return err({ code: 'revision_conflict', message: 'Event was modified concurrently' });
+      }
+      throw error;
+    }
+  }
+
+  // --- Devices (M5) -----------------------------------------------------------------------------
+
+  async createPairing(session: PairingSession): Promise<void> {
+    await this.db.insert(devicePairings).values({
+      id: session.id,
+      codeHash: session.codeHash,
+      secretHash: session.secretHash,
+      status: session.status,
+      deviceId: session.deviceId,
+      createdAt: toDate(session.createdAt),
+      expiresAt: toDate(session.expiresAt),
+      pairedAt: toDateOrNull(session.pairedAt),
+      claimedAt: toDateOrNull(session.claimedAt),
+    });
+  }
+
+  async findPairingByCodeHash(codeHash: string): Promise<PairingSession | null> {
+    const [row] = await this.db
+      .select()
+      .from(devicePairings)
+      // Only a pending session can still be paired; used codes never shadow a new one.
+      .where(and(eq(devicePairings.codeHash, codeHash), eq(devicePairings.status, 'pending')))
+      .orderBy(desc(devicePairings.createdAt))
+      .limit(1);
+    return row ? pairingFromRow(row) : null;
+  }
+
+  async findPairingBySecretHash(secretHash: string): Promise<PairingSession | null> {
+    const [row] = await this.db
+      .select()
+      .from(devicePairings)
+      .where(eq(devicePairings.secretHash, secretHash))
+      .limit(1);
+    return row ? pairingFromRow(row) : null;
+  }
+
+  async savePairing(prev: PairingSession, next: PairingSession): Promise<Result<void, AppError>> {
+    const updated = await this.db
+      .update(devicePairings)
+      .set({
+        status: next.status,
+        deviceId: next.deviceId,
+        pairedAt: toDateOrNull(next.pairedAt),
+        claimedAt: toDateOrNull(next.claimedAt),
+      })
+      .where(and(eq(devicePairings.id, prev.id), eq(devicePairings.status, prev.status)))
+      .returning({ id: devicePairings.id });
+    return updated.length === 0
+      ? err({ code: 'revision_conflict', message: 'Pairing changed concurrently' })
+      : ok(undefined);
+  }
+
+  async createDevice(device: Device, audit: readonly AuditRecord[] = []): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.insert(devices).values({
+        id: device.id,
+        eventId: device.scope.eventId,
+        showId: device.scope.showId,
+        name: device.name,
+        assignedBoardId: device.assignedBoardId,
+        credentialHash: null,
+        createdAt: toDate(device.createdAt),
+        lastSeenAt: toDateOrNull(device.lastSeenAt),
+        revokedAt: toDateOrNull(device.revokedAt),
+        revision: device.revision,
+      });
+      if (audit.length > 0) await tx.insert(auditEvents).values(auditRows(audit));
+    });
+  }
+
+  async pairDevice(
+    prev: PairingSession,
+    next: PairingSession,
+    device: Device,
+    audit: readonly AuditRecord[] = [],
+  ): Promise<Result<void, AppError>> {
+    try {
+      await this.db.transaction(async (tx) => {
+        await tx.insert(devices).values({
+          id: device.id,
+          eventId: device.scope.eventId,
+          showId: device.scope.showId,
+          name: device.name,
+          assignedBoardId: device.assignedBoardId,
+          credentialHash: null,
+          createdAt: toDate(device.createdAt),
+          lastSeenAt: null,
+          revokedAt: null,
+          revision: device.revision,
+        });
+        const updated = await tx
+          .update(devicePairings)
+          .set({
+            status: next.status,
+            deviceId: next.deviceId,
+            pairedAt: toDateOrNull(next.pairedAt),
+          })
+          .where(and(eq(devicePairings.id, prev.id), eq(devicePairings.status, prev.status)))
+          .returning({ id: devicePairings.id });
+        if (updated.length === 0) throw new RevisionConflict();
+        if (audit.length > 0) await tx.insert(auditEvents).values(auditRows(audit));
+      });
+      return ok(undefined);
+    } catch (error) {
+      if (error instanceof RevisionConflict) {
+        return err({ code: 'revision_conflict', message: 'Pairing changed concurrently' });
+      }
+      throw error;
+    }
+  }
+
+  async findDevice(deviceId: DeviceId): Promise<Device | null> {
+    const [row] = await this.db.select().from(devices).where(eq(devices.id, deviceId)).limit(1);
+    return row ? deviceFromRow(row) : null;
+  }
+
+  async findDeviceByCredentialHash(hash: string): Promise<Device | null> {
+    const [row] = await this.db
+      .select()
+      .from(devices)
+      .where(eq(devices.credentialHash, hash))
+      .limit(1);
+    return row ? deviceFromRow(row) : null;
+  }
+
+  async listDevices(scope: OwnerScope): Promise<readonly Device[]> {
+    const rows = await this.db
+      .select()
+      .from(devices)
+      .where(
+        scope.showId !== null
+          ? eq(devices.showId, scope.showId)
+          : eq(devices.eventId, scope.eventId ?? ''),
+      )
+      .orderBy(asc(devices.createdAt));
+    return rows.map(deviceFromRow);
+  }
+
+  async saveDevice(
+    prev: Device,
+    next: Device,
+    audit: readonly AuditRecord[] = [],
+  ): Promise<Result<void, AppError>> {
+    try {
+      await this.db.transaction(async (tx) => {
+        const updated = await tx
+          .update(devices)
+          .set({
+            name: next.name,
+            assignedBoardId: next.assignedBoardId,
+            revokedAt: toDateOrNull(next.revokedAt),
+            revision: next.revision,
+          })
+          .where(and(eq(devices.id, prev.id), eq(devices.revision, prev.revision)))
+          .returning({ id: devices.id });
+        if (updated.length === 0) throw new RevisionConflict();
+        if (audit.length > 0) await tx.insert(auditEvents).values(auditRows(audit));
+      });
+      return ok(undefined);
+    } catch (error) {
+      if (error instanceof RevisionConflict) {
+        return err({ code: 'revision_conflict', message: 'Device was modified concurrently' });
+      }
+      throw error;
+    }
+  }
+
+  async setDeviceCredential(deviceId: DeviceId, credentialHash: string): Promise<void> {
+    await this.db.update(devices).set({ credentialHash }).where(eq(devices.id, deviceId));
+  }
+
+  async removeDevice(deviceId: DeviceId, audit: readonly AuditRecord[] = []): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.delete(devices).where(eq(devices.id, deviceId));
+      if (audit.length > 0) await tx.insert(auditEvents).values(auditRows(audit));
+    });
+  }
+
+  async touchDevice(deviceId: DeviceId, at: EpochMs): Promise<void> {
+    await this.db
+      .update(devices)
+      .set({ lastSeenAt: toDate(at) })
+      .where(and(eq(devices.id, deviceId), isNull(devices.revokedAt)));
+  }
 
   async createQuickTimerShow(
     bundle: QuickTimerShow,
@@ -606,7 +1206,25 @@ export class PgShowStore
     audit: readonly AuditRecord[] = [],
   ): Promise<Result<void, AppError>> {
     try {
-      await this.db.transaction(async (tx) => {
+      await this.db.transaction(async (tx) => this.#writeShow(tx, prev, next, audit));
+      return ok(undefined);
+    } catch (error) {
+      if (error instanceof RevisionConflict) {
+        return err({ code: 'revision_conflict', message: 'Show was modified concurrently' });
+      }
+      throw error;
+    }
+  }
+
+  /** The diff writer of `saveShowAggregate`, reusable inside other transactions. */
+  async #writeShow(
+    tx: Tx,
+    prev: ShowAggregate,
+    next: ShowAggregate,
+    audit: readonly AuditRecord[],
+  ): Promise<void> {
+    {
+      {
         const claimed = await tx
           .update(shows)
           .set({ revision: next.revision })
@@ -865,6 +1483,7 @@ export class PgShowStore
             audit.map((a) => ({
               id: a.id,
               showId: a.showId,
+              eventId: a.eventId ?? null,
               at: toDate(a.at),
               actorKind: a.actor.kind,
               actorId: a.actor.id,
@@ -875,13 +1494,7 @@ export class PgShowStore
             })),
           );
         }
-      });
-      return ok(undefined);
-    } catch (error) {
-      if (error instanceof RevisionConflict) {
-        return err({ code: 'revision_conflict', message: 'Show was modified concurrently' });
       }
-      throw error;
     }
   }
 
@@ -894,7 +1507,8 @@ export class PgShowStore
       .limit(limit);
     return rows.map((r) => ({
       id: r.id,
-      showId: ShowId(r.showId),
+      showId: r.showId === null ? null : ShowId(r.showId),
+      eventId: r.eventId === null ? null : EventId(r.eventId),
       at: toMs(r.at),
       actor: { kind: r.actorKind, id: r.actorId },
       action: r.action,
@@ -926,7 +1540,7 @@ export class PgShowStore
       .from(boards)
       .where(eq(boards.id, boardId))
       .limit(1);
-    return row ? ShowId(row.showId) : null;
+    return row?.showId ? ShowId(row.showId) : null;
   }
 
   async get(queueItemId: QueueItemId): Promise<TimerState | null> {

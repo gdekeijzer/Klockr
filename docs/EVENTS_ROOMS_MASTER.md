@@ -81,3 +81,15 @@ Potential status sources:
 - running timers;
 - Board/Device connectivity;
 - warnings/locks.
+
+## Implementation (M5)
+
+- **Optional hierarchy:** `Event → Room / Area → Show`, never forced. A Show is standalone, in an Event without Room, or in exactly one Room (composite FK). Quick Timer is unchanged and never needs an Event. Existing Shows stayed standalone on migration.
+- **Event** (`packages/domain/src/event/event.ts`): name, description, start/end, one IANA timezone, status `draft | active | completed | archived`, revision. Shows created inside an Event inherit its timezone; an attached standalone Show keeps its own (shown as `TZ …` on its card, never silently rewritten).
+- **Room**: name, description, display order, status `active | inactive`, revision. Flat; only an empty Room can be deleted.
+- **Planning** (Event commands, one Event revision for CAS): add/update/move/delete Room; `show.place` (into a Room, between Rooms, out of a Room, reorder); `show.detach`; new Show in the Event; attach an existing Show (owner of both); duplicate (clean copy). No structural action starts timers, changes Current or touches the Show aggregate.
+- **Locks**: Event lock (all structure) and Room locks, plus the Show's own lock when moving that Show; never block live transport. Override explicit and audited.
+- **Event Dashboard** `/event/<id>`: Rooms with LIVE marker, Shows per Room and Event Shows without Room; per Show: Primary Queue Current, its timer (local derivation), Next with planned/projected start, Show offset, fixed-anchor risk, running timers, conflicts, pending suggestions, lock, Boards; Device summary; planning actions. Realtime (`event.state`), no polling.
+- **Room View** `/event/<id>/room/<roomId>`: current Show, Show cards, room agenda (planned · projected) as a view over the Shows' Primary Queues (no agenda database), Boards and Devices serving the Room.
+- **Master** shows the breadcrumb `Event / Room / Show`; it stays the Show's own editor.
+- **Audit** (event scope): `event.update`, `room.create/update/move/delete`, `show.create/attach/move/detach/duplicate`, `board.create/delete`, `lock.set/release/override`.

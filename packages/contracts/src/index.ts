@@ -1,6 +1,7 @@
 export * from './board';
 export * from './commands';
 export * from './common';
+export * from './event';
 export * from './health';
 export * from './queue';
 export * from './realtime';

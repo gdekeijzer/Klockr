@@ -1,6 +1,7 @@
 'use client';
 
 import { formatDuration } from '@klockr/ui';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { ApiError, createQuickTimer } from '../lib/api';
@@ -95,6 +96,14 @@ export function NewQuickTimer() {
           Anonymous timers are kept for 7 days. Only this browser can control it.
         </p>
       </section>
+      <p className={styles.note}>
+        Running several rooms or stages?{' '}
+        <Link href="/event/new" data-testid="plan-event">
+          Plan an Event
+        </Link>
+        {' · '}
+        <Link href="/device">Set up a display Device</Link>
+      </p>
     </main>
   );
 }

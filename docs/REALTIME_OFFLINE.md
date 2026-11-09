@@ -115,3 +115,10 @@ Do not treat WebSocket transport events as the domain model itself.
 - Operators receive `show.snapshot` on connect and `show.state` on every committed change (gated by Show revision), plus `timer.state` transitions (gated by timer revision).
 - Boards receive only their own scoped `board.snapshot` on every committed change (gated by Board `version`); raw `timer.state` events are no longer sent to Boards because they could leak items outside the Board's sources/audience.
 - Boards keep rendering all running timers (single and multi-Queue) from the last snapshot during an outage, show a subtle RECONNECTING, extrapolate offset/agenda times via `growsAfter`, expire Messages locally, and resynchronise to an authoritative snapshot on reconnect (E2E tested with two Boards).
+
+## Implementation (M5)
+
+- New handshake roles: `event` (Event owner cookie) → `event.state` on connect and after every Event change, every committed change of a Show placed in the Event, and every Device change/presence change; `device` (Device credential) → `device.snapshot` (identity + assigned Board projection) and the Board's `board.snapshot` stream. Operators of a Show may authenticate with the Event cookie as well.
+- Event/Room Boards receive `board.snapshot` whenever the Event or one of its Shows changes (version = server time, monotonic).
+- Reassignment moves a Device's sockets to the new Board room and resends `device.snapshot` — no reconnect. Revocation (Device or share link) sends `access.revoked` and disconnects; the client stops reconnecting and shows its revoked state.
+- Device presence is in memory on the single realtime server (online = connected socket); `last_seen_at` is persisted sparsely. Displays pair by short polling (every 2 s) only while the pairing screen is open.

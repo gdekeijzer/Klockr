@@ -1,12 +1,15 @@
 import {
   GrantAuthorizer,
-  type EventPublisher,
-  type GrantRepository,
   type AuditRepository,
+  type DevicePresence,
+  type DeviceRepository,
+  type EventPublisher,
+  type EventRepository,
+  type GrantRepository,
   type IdempotencyStore,
-  type ShowStateRepository,
+  type PlatformDeps,
   type ShowRepository,
-  type ShowServiceDeps,
+  type ShowStateRepository,
   type TimerRepository,
 } from '@klockr/application';
 import type { Clock } from '@klockr/domain';
@@ -18,7 +21,9 @@ export interface Persistence {
     ShowStateRepository &
     TimerRepository &
     GrantRepository &
-    AuditRepository;
+    AuditRepository &
+    EventRepository &
+    DeviceRepository;
   readonly idempotency: IdempotencyStore;
 }
 
@@ -27,8 +32,10 @@ export function createServices(options: {
   readonly persistence: Persistence;
   readonly clock: Clock;
   readonly events: EventPublisher;
+  /** Live Device presence (the realtime hub); defaults to "nobody connected". */
+  readonly presence?: DevicePresence;
   readonly onPublishError?: (error: unknown) => void;
-}): ShowServiceDeps {
+}): PlatformDeps {
   const { store, idempotency } = options.persistence;
   return {
     clock: options.clock,
@@ -38,6 +45,9 @@ export function createServices(options: {
     grants: store,
     audit: store,
     locator: store,
+    eventStore: store,
+    deviceStore: store,
+    presence: options.presence ?? { isConnected: () => false },
     idempotency,
     events: options.events,
     tokens: new NodeTokenService(),

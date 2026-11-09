@@ -21,7 +21,7 @@ export async function startTestServer(options: { clock?: Clock; persistence?: Pe
   const store = new InMemoryStore();
   const persistence = options.persistence ?? { store, idempotency: new InMemoryIdempotencyStore() };
   const hub = new RealtimeHub(clock);
-  const services = createServices({ clock, events: hub, persistence });
+  const services = createServices({ clock, events: hub, presence: hub, persistence });
   const app = await buildApp({ version: 'test', logLevel: 'silent', clock, services });
   const io = attachRealtime(app.server, services, hub);
   await app.listen({ host: '127.0.0.1', port: 0 });

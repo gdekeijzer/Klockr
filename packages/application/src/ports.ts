@@ -2,8 +2,13 @@ import type {
   AccessGrant,
   ActorRef,
   BoardId,
+  Device,
+  DeviceId,
   EpochMs,
+  EventAggregate,
+  EventId,
   GrantId,
+  PairingSession,
   Permission,
   ShowAggregate,
   QueueItemId,
@@ -21,7 +26,15 @@ export type { Permission } from '@klockr/domain';
 export type ResourceRef =
   | { readonly kind: 'queueItem'; readonly id: string }
   | { readonly kind: 'show'; readonly id: string }
-  | { readonly kind: 'board'; readonly id: string };
+  | { readonly kind: 'board'; readonly id: string }
+  | { readonly kind: 'event'; readonly id: string }
+  | { readonly kind: 'device'; readonly id: string };
+
+/** Owner scope of a Board or Device: a Show (and the Event it sits in) or an Event. */
+export interface OwnerScope {
+  readonly showId: ShowId | null;
+  readonly eventId: EventId | null;
+}
 
 /** Capabilities are checked, never role names. Roles/grant kinds are bundles of these. */
 export interface Authorizer {
@@ -45,6 +58,12 @@ export interface TimerRepository {
 export interface ShowLocator {
   showIdOfItem(queueItemId: QueueItemId): Promise<ShowId | null>;
   showIdOfBoard(boardId: BoardId): Promise<ShowId | null>;
+  /** M5: the Event a Show is placed in (null = standalone). */
+  eventIdOfShow(showId: ShowId): Promise<EventId | null>;
+  /** M5: owner of a Board (Show Board: its Show + that Show's Event; Event Board: the Event). */
+  scopeOfBoard(boardId: BoardId): Promise<OwnerScope | null>;
+  /** M5: scope of a Device (for a Show-scoped Device also the Event of that Show). */
+  scopeOfDevice(deviceId: DeviceId): Promise<OwnerScope | null>;
 }
 
 /** Durable record of a newly issued credential. Only the hash of the secret is stored. */
@@ -59,6 +78,64 @@ export interface ShowRepository extends ShowLocator {
   getShow(showId: ShowId): Promise<Show | null>;
   /** Record management activity (feeds anonymous lifecycle/cleanup protection). */
   touch(showId: ShowId, at: EpochMs): Promise<void>;
+  /** M5: persist a complete new Show (Show in Event, duplicate) and its grants atomically. */
+  createShow(
+    show: Show,
+    aggregate: ShowAggregate,
+    grants: readonly NewGrantRecord[],
+    audit?: readonly AuditRecord[],
+  ): Promise<void>;
+}
+
+/**
+ * M5: Event persistence. The Event aggregate (Event, Rooms, Show placement, Event Boards,
+ * Event/Room locks) is saved atomically with compare-and-set on the Event revision; placement
+ * is written to the Shows (event/room/order) in the same transaction.
+ */
+export interface EventRepository {
+  createEvent(agg: EventAggregate, grants: readonly NewGrantRecord[]): Promise<void>;
+  loadEvent(eventId: EventId): Promise<EventAggregate | null>;
+  saveEvent(
+    prev: EventAggregate,
+    next: EventAggregate,
+    audit?: readonly AuditRecord[],
+  ): Promise<Result<void, AppError>>;
+}
+
+/** M5: Devices and pairing sessions. Only hashes of codes, secrets and credentials are stored. */
+export interface DeviceRepository {
+  createPairing(session: PairingSession): Promise<void>;
+  /** The newest PENDING session with this code (used/claimed codes are ignored). */
+  findPairingByCodeHash(codeHash: string): Promise<PairingSession | null>;
+  findPairingBySecretHash(secretHash: string): Promise<PairingSession | null>;
+  /** Compare-and-set on the previous status (one-time pair / claim). */
+  savePairing(prev: PairingSession, next: PairingSession): Promise<Result<void, AppError>>;
+  createDevice(device: Device, audit?: readonly AuditRecord[]): Promise<void>;
+  /** Pairing in ONE transaction: create the Device and mark the session paired (CAS on status). */
+  pairDevice(
+    prev: PairingSession,
+    next: PairingSession,
+    device: Device,
+    audit?: readonly AuditRecord[],
+  ): Promise<Result<void, AppError>>;
+  findDevice(deviceId: DeviceId): Promise<Device | null>;
+  findDeviceByCredentialHash(hash: string): Promise<Device | null>;
+  listDevices(scope: OwnerScope): Promise<readonly Device[]>;
+  /** Compare-and-set on the Device revision, with audit in the same transaction. */
+  saveDevice(
+    prev: Device,
+    next: Device,
+    audit?: readonly AuditRecord[],
+  ): Promise<Result<void, AppError>>;
+  setDeviceCredential(deviceId: DeviceId, credentialHash: string): Promise<void>;
+  removeDevice(deviceId: DeviceId, audit?: readonly AuditRecord[]): Promise<void>;
+  /** Presence history only (no revision bump). */
+  touchDevice(deviceId: DeviceId, at: EpochMs): Promise<void>;
+}
+
+/** Live presence of Devices (the realtime server knows who is connected). */
+export interface DevicePresence {
+  isConnected(deviceId: string): boolean;
 }
 
 /**
@@ -85,7 +162,9 @@ export interface ShowStateRepository {
  */
 export interface AuditRecord {
   readonly id: string;
-  readonly showId: ShowId;
+  /** Scope of the record: a Show and/or (M5) an Event. */
+  readonly showId: ShowId | null;
+  readonly eventId?: EventId | null;
   readonly at: EpochMs;
   readonly actor: ActorRef;
   readonly action: string;
@@ -102,9 +181,19 @@ export interface GrantRepository {
   create(record: NewGrantRecord): Promise<void>;
   findById(id: GrantId): Promise<AccessGrant | null>;
   findByTokenHash(tokenHash: string): Promise<AccessGrant | null>;
+  /** M5: Board share grants of a Show or an Event (including revoked ones). */
+  listBoardShares(scope: OwnerScope): Promise<readonly AccessGrant[]>;
+  /** M5: revoke a grant (sets revokedAt); audited in the same transaction. */
+  revokeGrant(id: GrantId, at: EpochMs, audit?: readonly AuditRecord[]): Promise<void>;
+  /** M5: persist a new grant together with its audit record. */
+  createWithAudit(record: NewGrantRecord, audit: readonly AuditRecord[]): Promise<void>;
 }
 
-export type TokenKind = 'owner' | 'board';
+/**
+ * Credential families: `owner` (anonymous Show owner), `event` (anonymous Event owner),
+ * `board` (Board share), `device` (paired Device), `pairing` (display-side pairing secret).
+ */
+export type TokenKind = 'owner' | 'event' | 'board' | 'device' | 'pairing';
 
 /**
  * Issues and hashes opaque high-entropy credentials. Implementations must use a CSPRNG and a
@@ -115,6 +204,8 @@ export interface TokenService {
   hash(token: string): string;
   /** Kind encoded in the token's prefix, or null when malformed. */
   kindOf(token: string): TokenKind | null;
+  /** CSPRNG integer in [0, n) (pairing codes). */
+  randomIndex(n: number): number;
 }
 
 export interface IdGenerator {
@@ -152,7 +243,38 @@ export interface ShowChangedEvent {
   readonly occurredAt: EpochMs;
 }
 
-export type ApplicationEvent = TimerTransitionedEvent | ShowChangedEvent;
+/** M5: a committed change of an Event aggregate (structure, placement, Event Boards, locks). */
+export interface EventChangedEvent {
+  readonly type: 'event.changed';
+  readonly eventId: EventId;
+  /** Shows whose placement changed (their context/breadcrumb changed). */
+  readonly showIds: readonly ShowId[];
+  readonly occurredAt: EpochMs;
+}
+
+/** M5: Devices of a scope changed (paired, renamed, (re)assigned, revoked, removed, presence). */
+export interface DevicesChangedEvent {
+  readonly type: 'devices.changed';
+  readonly scope: OwnerScope;
+  /** Devices whose display must be refreshed (assignment) or cut off (revocation). */
+  readonly deviceIds: readonly DeviceId[];
+  readonly revoked: boolean;
+  readonly occurredAt: EpochMs;
+}
+
+/** M5: a Board share credential was revoked; open connections must be closed. */
+export interface AccessRevokedEvent {
+  readonly type: 'access.revoked';
+  readonly grantId: GrantId;
+  readonly occurredAt: EpochMs;
+}
+
+export type ApplicationEvent =
+  | TimerTransitionedEvent
+  | ShowChangedEvent
+  | EventChangedEvent
+  | DevicesChangedEvent
+  | AccessRevokedEvent;
 
 /**
  * Receives committed transitions (realtime hub, future Actions). Delivery failures must never

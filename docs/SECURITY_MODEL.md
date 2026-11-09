@@ -129,3 +129,11 @@ Anonymous cleanup verifies expiry, active-use protection and grace/safety policy
 - Board share tokens are per Board (hashed at rest) and grant `board.read` only; a Board token cannot read Show State or mutate anything.
 - Message text is plain text (≤ 120 chars), rendered as text, never HTML.
 - New management commands are permission-gated by capability (`queue.create`, `queue.delete`, `relation.manage`, `board.manage`, `message.send`) and go through the same lock gate and audit as earlier commands.
+
+## Implemented in M5
+
+- Event scope: `anonymous_event_owner` grant (hashed token in an HttpOnly cookie) covers the Event and Shows placed in it; attaching a Show requires owner access to both. See ADR-0011.
+- Devices: separate credential (`kld_`, SHA-256 hash), never accepted as owner/Board-share credential, read-only access to the assigned Board inside its scope (re-checked on every read); revocation is final and cuts live connections. Pairing codes: 10 min, one-time, hashed, redeemable only by an authenticated manager; the display claims with a separate 256-bit secret, once. Pairing endpoints are rate limited.
+- Share links: labelled, listable, revocable; revocation is immediate for HTTP and realtime.
+- Event/Room Boards use the same server-side scoped projection as Show Boards (audience filtering, no hidden items, no management metadata).
+- All new management actions are capability-checked and audited (Event, Room, Show move/duplicate, Device pair/assign/revoke, share create/revoke).

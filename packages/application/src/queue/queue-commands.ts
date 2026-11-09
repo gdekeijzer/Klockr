@@ -46,7 +46,6 @@ import {
   validateBoard,
   withQueueView,
   BoardId,
-  QueueId,
   type ActorRef,
   type Board,
   type OperationContext,
@@ -69,6 +68,7 @@ import {
   type AuditDraft,
   type MutationDeps,
 } from './mutate';
+import { sourcesFromDto } from './projection';
 
 /** Queue, relation, suggestion, Board and Message commands: exactly the boundary DTOs. */
 export type QueueCommand = QueueCommandDto;
@@ -614,6 +614,7 @@ export function applyShowCommand(
       const board: Board = {
         id: BoardId(ctx.newId()),
         showId: show.showId,
+        eventId: null,
         name: command.payload.name ?? defaults.name,
         preset: command.payload.preset,
         audience: defaults.audience,
@@ -635,14 +636,7 @@ export function applyShowCommand(
       const candidate: Board = {
         ...existing,
         ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)),
-        ...(sources
-          ? {
-              sources:
-                sources.kind === 'selected'
-                  ? { kind: 'selected', queueIds: sources.queueIds.map(QueueId) }
-                  : { kind: sources.kind },
-            }
-          : {}),
+        ...(sources ? { sources: sourcesFromDto(sources) } : {}),
         presentation: {
           ...existing.presentation,
           ...Object.fromEntries(

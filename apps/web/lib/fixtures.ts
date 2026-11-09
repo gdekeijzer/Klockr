@@ -104,6 +104,7 @@ export function showFixture(queues: QueueSnapshot[], revision = 1): ShowStateSna
       createdAt: 0,
       expiresAt: 0,
       revision,
+      context: null,
       primaryQueueId: queues[0]?.id ?? 'q',
     },
     queues,

@@ -155,7 +155,7 @@ describe('Queue commands (application layer)', () => {
       await add('Speaker A', MINUTE_MS);
       const last = events.events.at(-1);
       expect(last?.type).toBe('show.changed');
-      expect(last?.showId).toBe(showId);
+      expect(last && 'showId' in last ? last.showId : null).toBe(showId);
       expect(store.shows.get(showId)?.lastActiveAt).toBe(clock.now());
     });
   });

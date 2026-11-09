@@ -58,6 +58,9 @@ describe('executeTimerCommand', () => {
       locator: {
         showIdOfItem: (id) => Promise.resolve(id === itemId ? ShowId('show-1') : null),
         showIdOfBoard: () => Promise.resolve(null),
+        eventIdOfShow: () => Promise.resolve(null),
+        scopeOfBoard: () => Promise.resolve(null),
+        scopeOfDevice: () => Promise.resolve(null),
       },
     };
     const created = createTimer({ mode: 'countdown', durationMs: 10 * MINUTE_MS });
@@ -85,7 +88,7 @@ describe('executeTimerCommand', () => {
 
     const stopped = await executeTimerCommand(cmd('timer.stop'), ctx, deps);
     expect(stopped.ok && stopped.value.state.status).toBe('stopped');
-    expect(events.events.map((e) => e.commandType)).toEqual([
+    expect(events.events.map((e) => ('commandType' in e ? e.commandType : null))).toEqual([
       'timer.start',
       'timer.pause',
       'timer.resume',
@@ -99,7 +102,9 @@ describe('executeTimerCommand', () => {
     clock.advance(MINUTE_MS);
     const stopped = await executeTimerCommand(cmd('timer.stop'), ctx, deps);
     expect(stopped.ok && stopped.value.state.status).toBe('stopped');
-    expect(events.events.at(-1)?.commandType).toBe('timer.stop');
+    expect((events.events.at(-1) as { commandType?: string } | undefined)?.commandType).toBe(
+      'timer.stop',
+    );
 
     const restarted = await executeTimerCommand(cmd('timer.start'), ctx, deps);
     if (!restarted.ok) throw new Error('restart failed');

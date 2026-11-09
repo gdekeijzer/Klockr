@@ -20,7 +20,9 @@ import {
   nextItem,
   orderedItems,
   queueView,
+  QueueId,
   resolveItemThresholds,
+  RoomId,
   resolveQueueThresholds,
   showEffectiveLock,
   type Board,
@@ -98,16 +100,37 @@ export function toQueueSnapshot(
   };
 }
 
+/** Board sources domain -> wire. */
+export function sourcesToDto(sources: Board['sources']): BoardConfigDto['sources'] {
+  switch (sources.kind) {
+    case 'selected':
+      return { kind: 'selected', queueIds: [...sources.queueIds] };
+    case 'room':
+      return { kind: 'room', roomId: sources.roomId };
+    default:
+      return { kind: sources.kind };
+  }
+}
+
+/** Board sources wire -> domain (validated afterwards by `validateBoard`). */
+export function sourcesFromDto(sources: BoardConfigDto['sources']): Board['sources'] {
+  switch (sources.kind) {
+    case 'selected':
+      return { kind: 'selected', queueIds: sources.queueIds.map(QueueId) };
+    case 'room':
+      return { kind: 'room', roomId: RoomId(sources.roomId) };
+    default:
+      return { kind: sources.kind };
+  }
+}
+
 export function toBoardConfig(board: Board): BoardConfigDto {
   return {
     id: board.id,
     name: board.name,
     preset: board.preset,
     audience: board.audience,
-    sources:
-      board.sources.kind === 'selected'
-        ? { kind: 'selected', queueIds: [...board.sources.queueIds] }
-        : { kind: board.sources.kind },
+    sources: sourcesToDto(board.sources),
     components: board.components.map((c) => ({ ...c })),
     presentation: { ...board.presentation },
     revision: board.revision,
@@ -126,11 +149,15 @@ function messageSnapshot(m: Message): MessageSnapshot {
   };
 }
 
+/** M5: Event / Room breadcrumb of a Show. */
+export type ShowContextDto = ShowStateSnapshot['show']['context'];
+
 /** Management projection of the whole Show (Operator, Master, Boards admin). */
 export function toShowStateSnapshot(
   meta: Show,
   show: ShowAggregate,
   now: EpochMs,
+  context: ShowContextDto = null,
 ): ShowStateSnapshot {
   return {
     show: {
@@ -141,6 +168,7 @@ export function toShowStateSnapshot(
       expiresAt: meta.expiresAt,
       revision: show.revision,
       primaryQueueId: show.primaryQueueId,
+      context,
     },
     queues: show.queues.flatMap((q) => {
       const view = queueView(show, q.queue.id);

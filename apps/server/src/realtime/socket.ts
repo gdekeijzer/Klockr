@@ -1,9 +1,13 @@
 import {
+  authenticateDevice,
   authenticateToken,
-  getBoardState,
-  getShowState,
+  getDeviceDisplay,
+  getEventState,
+  getShowStateWithContext,
+  readSharedBoard,
+  recordDevicePresence,
   type Actor,
-  type ShowServiceDeps,
+  type PlatformDeps,
 } from '@klockr/application';
 import {
   REALTIME_PATH,
@@ -12,22 +16,24 @@ import {
   type ClientToServerEvents,
   type ServerToClientEvents,
 } from '@klockr/contracts';
-import type { BoardId, ShowId } from '@klockr/domain';
+import { LAST_SEEN_WRITE_INTERVAL_MS, ShowId, type BoardId, type Device } from '@klockr/domain';
 import { parseCookie } from 'cookie';
 import type { Server as HttpServer } from 'node:http';
 import { Server, type Socket } from 'socket.io';
-import { ownerTokenFromCookies } from '../http/auth';
+import { eventOwnerFromCookies, managementFromCookies } from '../http/auth';
 import { FixedWindowLimiter } from '../infra/rate-limiter';
-import { boardRoom, boardsRoom, operatorRoom, type RealtimeHub } from './hub';
+import { boardRoom, deviceRoom, eventRoom, grantRoom, operatorRoom, type RealtimeHub } from './hub';
 
 type Subscription =
   | { readonly role: 'operator'; readonly showId: ShowId; readonly actor: Actor }
   | {
       readonly role: 'board';
-      readonly showId: ShowId;
       readonly boardId: BoardId;
+      readonly grantId: string;
       readonly actor: Actor;
-    };
+    }
+  | { readonly role: 'event'; readonly eventId: string; readonly actor: Actor }
+  | { readonly role: 'device'; readonly device: Device };
 
 interface SocketData {
   subscription: Subscription;
@@ -47,9 +53,10 @@ type KlockrSocket = Socket<
 >;
 
 /**
- * Socket.IO is a read channel: Operators (owner cookie) and Boards (board token) subscribe to one
- * Show room. Every connect and reconnect sends a fresh authoritative snapshot; afterwards only
- * transition snapshots and Queue/Board projections arrive. Mutations go through HTTP commands.
+ * Socket.IO is a read channel: Operators (Show or Event owner cookie), Event managers (Event
+ * cookie), Boards (board token) and paired Devices (device credential) subscribe to their rooms.
+ * Every connect and reconnect sends a fresh authoritative snapshot; afterwards only transition
+ * snapshots and projections arrive. Mutations go through HTTP commands.
  */
 export interface RealtimeLogger {
   info(obj: object, msg: string): void;
@@ -60,7 +67,7 @@ const silentLogger: RealtimeLogger = { info: () => undefined, warn: () => undefi
 
 export function attachRealtime(
   httpServer: HttpServer,
-  services: ShowServiceDeps,
+  services: PlatformDeps,
   hub: RealtimeHub,
   logger: RealtimeLogger = silentLogger,
 ): KlockrServer {
@@ -80,25 +87,45 @@ export function attachRealtime(
       const auth = realtimeAuthSchema.safeParse(socket.handshake.auth);
       if (!auth.success) throw new Error('invalid_auth');
 
-      if (auth.data.role === 'operator') {
-        const cookies = parseCookie(socket.handshake.headers.cookie ?? '');
-        const token = ownerTokenFromCookies(cookies, auth.data.showId);
-        const owner = token ? await authenticateToken(token, 'owner', services) : null;
-        if (!owner || owner.grant.showId !== auth.data.showId) throw new Error('unauthorized');
-        socket.data.subscription = {
-          role: 'operator',
-          showId: owner.grant.showId,
-          actor: owner.actor,
-        };
-      } else {
-        const board = await authenticateToken(auth.data.boardShareToken, 'board', services);
-        if (!board?.grant.boardId) throw new Error('unauthorized');
-        socket.data.subscription = {
-          role: 'board',
-          showId: board.grant.showId,
-          boardId: board.grant.boardId,
-          actor: board.actor,
-        };
+      const cookies = () => parseCookie(socket.handshake.headers.cookie ?? '');
+      switch (auth.data.role) {
+        case 'operator': {
+          const principal = await managementFromCookies(cookies(), auth.data.showId, services);
+          if (!principal) throw new Error('unauthorized');
+          socket.data.subscription = {
+            role: 'operator',
+            showId: ShowId(auth.data.showId),
+            actor: principal.actor,
+          };
+          break;
+        }
+        case 'board': {
+          const board = await authenticateToken(auth.data.boardShareToken, 'board', services);
+          if (!board?.grant.boardId) throw new Error('unauthorized');
+          socket.data.subscription = {
+            role: 'board',
+            boardId: board.grant.boardId,
+            grantId: board.grant.id,
+            actor: board.actor,
+          };
+          break;
+        }
+        case 'event': {
+          const principal = await eventOwnerFromCookies(cookies(), auth.data.eventId, services);
+          if (!principal) throw new Error('unauthorized');
+          socket.data.subscription = {
+            role: 'event',
+            eventId: auth.data.eventId,
+            actor: principal.actor,
+          };
+          break;
+        }
+        case 'device': {
+          const device = await authenticateDevice(auth.data.deviceToken, services);
+          if (!device) throw new Error('unauthorized');
+          socket.data.subscription = { role: 'device', device };
+          break;
+        }
       }
     })().then(
       () => {
@@ -118,12 +145,29 @@ export function attachRealtime(
 
   io.on('connection', (socket: KlockrSocket) => {
     const sub = socket.data.subscription;
+    const label =
+      sub.role === 'operator'
+        ? { showId: sub.showId }
+        : sub.role === 'board'
+          ? { boardId: sub.boardId }
+          : sub.role === 'event'
+            ? { eventId: sub.eventId }
+            : { deviceId: sub.device.id };
     logger.info(
-      { role: sub.role, showId: sub.showId, transport: socket.conn.transport.name },
+      { role: sub.role, ...label, transport: socket.conn.transport.name },
       'realtime client connected',
     );
+    let presenceTimer: ReturnType<typeof setInterval> | null = null;
     socket.on('disconnect', (reason) => {
-      logger.info({ role: sub.role, showId: sub.showId, reason }, 'realtime client disconnected');
+      logger.info({ role: sub.role, ...label, reason }, 'realtime client disconnected');
+      if (sub.role === 'device') {
+        if (presenceTimer) clearInterval(presenceTimer);
+        hub.deviceDisconnected(sub.device.id);
+        void (async () => {
+          await recordDevicePresence(sub.device, true, services);
+          await hub.publish(presenceChanged(sub.device, services.clock.now()));
+        })();
+      }
     });
 
     socket.on(realtimeEvents.clock, (ack) => {
@@ -132,20 +176,63 @@ export function attachRealtime(
 
     void (async () => {
       // Join first, then snapshot: a transition between the two is delivered as a newer revision.
-      if (sub.role === 'operator') {
-        await socket.join(operatorRoom(sub.showId));
-        const state = await getShowState(sub.showId, { actor: sub.actor }, services);
-        if (state.ok) socket.emit(realtimeEvents.showSnapshot, state.value);
-        else socket.disconnect(true);
-      } else {
-        await socket.join([boardsRoom(sub.showId), boardRoom(sub.boardId)]);
-        const state = await getBoardState(sub.boardId, { actor: sub.actor }, services);
-        if (state.ok) socket.emit(realtimeEvents.boardSnapshot, state.value);
-        else socket.disconnect(true);
+      switch (sub.role) {
+        case 'operator': {
+          await socket.join(operatorRoom(sub.showId));
+          const state = await getShowStateWithContext(sub.showId, { actor: sub.actor }, services);
+          if (state.ok) socket.emit(realtimeEvents.showSnapshot, state.value);
+          else socket.disconnect(true);
+          return;
+        }
+        case 'board': {
+          await socket.join([boardRoom(sub.boardId), grantRoom(sub.grantId)]);
+          const state = await readSharedBoard(sub.boardId, { actor: sub.actor }, services);
+          if (state.ok) socket.emit(realtimeEvents.boardSnapshot, state.value);
+          else socket.disconnect(true);
+          return;
+        }
+        case 'event': {
+          await socket.join(eventRoom(sub.eventId));
+          const state = await getEventState(sub.eventId, { actor: sub.actor }, services);
+          if (state.ok) socket.emit(realtimeEvents.event, state.value);
+          else socket.disconnect(true);
+          return;
+        }
+        case 'device': {
+          const display = await getDeviceDisplay(sub.device, services);
+          await socket.join([
+            deviceRoom(sub.device.id),
+            ...(display.board ? [boardRoom(display.board.board.id)] : []),
+          ]);
+          socket.emit(realtimeEvents.device, display);
+          hub.deviceConnected(sub.device.id);
+          await recordDevicePresence(sub.device, true, services);
+          await hub.publish(presenceChanged(sub.device, services.clock.now()));
+          // Sparse presence history while connected (never per second).
+          presenceTimer = setInterval(() => {
+            void (async () => {
+              const fresh = await services.deviceStore.findDevice(sub.device.id);
+              if (fresh) await recordDevicePresence(fresh, false, services);
+            })();
+          }, LAST_SEEN_WRITE_INTERVAL_MS);
+          presenceTimer.unref();
+          return;
+        }
       }
     })();
   });
 
-  hub.attach(io, { showMeta: (showId) => services.shows.getShow(showId) });
+  hub.attach(io, services);
   return io;
+}
+
+/** Presence changed: managers of the Device's scope get a fresh status (no Device re-routing). */
+function presenceChanged(device: Device, now: number) {
+  return {
+    type: 'devices.changed' as const,
+    scope: { showId: device.scope.showId, eventId: device.scope.eventId },
+    deviceIds: [],
+    revoked: false,
+    occurredAt: now,
+  };
 }

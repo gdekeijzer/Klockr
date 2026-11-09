@@ -14,7 +14,7 @@ export interface AuthenticatedPrincipal {
  */
 export async function authenticateToken(
   token: string,
-  expected: 'owner' | 'board',
+  expected: 'owner' | 'event' | 'board',
   deps: { readonly tokens: TokenService; readonly grants: GrantRepository; readonly clock: Clock },
 ): Promise<AuthenticatedPrincipal | null> {
   if (deps.tokens.kindOf(token) !== expected) return null;
@@ -22,6 +22,9 @@ export async function authenticateToken(
   if (!grant || !isGrantActive(grant, deps.clock.now())) return null;
 
   if (expected === 'owner' && grant.kind === 'anonymous_owner') {
+    return { grant, actor: { kind: 'management_grant', id: grant.id } };
+  }
+  if (expected === 'event' && grant.kind === 'anonymous_event_owner') {
     return { grant, actor: { kind: 'management_grant', id: grant.id } };
   }
   if (expected === 'board' && grant.kind === 'board_share') {

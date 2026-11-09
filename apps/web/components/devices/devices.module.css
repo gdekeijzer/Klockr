@@ -1,0 +1,39 @@
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--k-spacing-2);
+  align-items: center;
+}
+
+.deviceRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--k-spacing-3);
+  padding: var(--k-spacing-3);
+  border: 1px solid var(--k-border-subtle);
+  border-radius: var(--k-radius-control);
+  background: var(--k-background-canvas);
+}
+
+.deviceRow[data-revoked='true'] {
+  opacity: 0.6;
+}
+
+.deviceMain {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--k-spacing-2);
+  align-items: center;
+}
+
+.inline select {
+  min-width: 200px;
+}

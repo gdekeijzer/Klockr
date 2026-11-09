@@ -3,8 +3,13 @@ import {
   type AccessGrant,
   type Board,
   type BoardId,
+  type Device,
+  type DeviceId,
   type EpochMs,
+  type EventAggregate,
+  type EventId,
   type GrantId,
+  type PairingSession,
   queueView,
   type QueueAggregate,
   type QueueId,
@@ -21,7 +26,10 @@ import { appError, type AppError } from '../errors';
 import type {
   AuditRecord,
   AuditRepository,
+  DeviceRepository,
+  EventRepository,
   GrantRepository,
+  OwnerScope,
   IdGenerator,
   NewGrantRecord,
   ShowRepository,
@@ -38,9 +46,19 @@ import { changedTimers } from '../queue';
  * Like the PostgreSQL adapter it keeps only pending suggestions and uncleared messages.
  */
 export class InMemoryStore
-  implements ShowRepository, ShowStateRepository, TimerRepository, GrantRepository, AuditRepository
+  implements
+    ShowRepository,
+    ShowStateRepository,
+    TimerRepository,
+    GrantRepository,
+    AuditRepository,
+    EventRepository,
+    DeviceRepository
 {
   readonly shows = new Map<string, Show>();
+  readonly events = new Map<string, EventAggregate>();
+  readonly devices = new Map<string, { device: Device; credentialHash: string | null }>();
+  readonly pairings = new Map<string, PairingSession>();
   readonly aggregates = new Map<string, ShowAggregate>();
   readonly grants = new Map<string, { grant: AccessGrant; tokenHash: string }>();
   readonly audit: AuditRecord[] = [];
@@ -88,6 +106,19 @@ export class InMemoryStore
       messages: [],
     });
     for (const record of grants) this.grants.set(record.grant.id, record);
+    return Promise.resolve();
+  }
+
+  createShow(
+    show: Show,
+    aggregate: ShowAggregate,
+    grants: readonly NewGrantRecord[],
+    audit: readonly AuditRecord[] = [],
+  ): Promise<void> {
+    this.shows.set(show.id, show);
+    this.aggregates.set(show.id, aggregate);
+    for (const record of grants) this.grants.set(record.grant.id, record);
+    this.audit.push(...audit);
     return Promise.resolve();
   }
 
@@ -176,6 +207,31 @@ export class InMemoryStore
     return Promise.resolve(null);
   }
 
+  eventIdOfShow(showId: ShowId): Promise<EventId | null> {
+    return Promise.resolve(this.shows.get(showId)?.eventId ?? null);
+  }
+
+  async scopeOfBoard(boardId: BoardId): Promise<OwnerScope | null> {
+    const showId = await this.showIdOfBoard(boardId);
+    if (showId) return { showId, eventId: await this.eventIdOfShow(showId) };
+    for (const e of this.events.values()) {
+      if (e.boards.some((b) => b.id === boardId)) return { showId: null, eventId: e.event.id };
+    }
+    return null;
+  }
+
+  async scopeOfDevice(deviceId: DeviceId): Promise<OwnerScope | null> {
+    const device = this.devices.get(deviceId)?.device;
+    if (!device) return null;
+    if (device.scope.showId) {
+      return {
+        showId: device.scope.showId,
+        eventId: await this.eventIdOfShow(device.scope.showId),
+      };
+    }
+    return { showId: null, eventId: device.scope.eventId };
+  }
+
   get(queueItemId: QueueItemId): Promise<TimerState | null> {
     return Promise.resolve(this.#find(queueItemId)?.item.timer ?? null);
   }
@@ -221,7 +277,177 @@ export class InMemoryStore
     const record = this.grants.get(id);
     if (record) this.grants.set(id, { ...record, grant: { ...record.grant, revokedAt: at } });
   }
+
+  listBoardShares(scope: OwnerScope): Promise<readonly AccessGrant[]> {
+    return Promise.resolve(
+      [...this.grants.values()]
+        .map((r) => r.grant)
+        .filter(
+          (g) =>
+            g.kind === 'board_share' &&
+            (scope.showId !== null ? g.showId === scope.showId : g.eventId === scope.eventId),
+        )
+        .sort((a, b) => a.createdAt - b.createdAt),
+    );
+  }
+
+  revokeGrant(id: GrantId, at: EpochMs, audit: readonly AuditRecord[] = []): Promise<void> {
+    this.revoke(id, at);
+    this.audit.push(...audit);
+    return Promise.resolve();
+  }
+
+  createWithAudit(record: NewGrantRecord, audit: readonly AuditRecord[]): Promise<void> {
+    this.grants.set(record.grant.id, record);
+    this.audit.push(...audit);
+    return Promise.resolve();
+  }
+
+  // --- Events (M5) ------------------------------------------------------------------------------
+
+  createEvent(agg: EventAggregate, grants: readonly NewGrantRecord[]): Promise<void> {
+    this.events.set(agg.event.id, agg);
+    for (const record of grants) this.grants.set(record.grant.id, record);
+    return Promise.resolve();
+  }
+
+  loadEvent(eventId: EventId): Promise<EventAggregate | null> {
+    return Promise.resolve(this.events.get(eventId) ?? null);
+  }
+
+  saveEvent(
+    prev: EventAggregate,
+    next: EventAggregate,
+    audit: readonly AuditRecord[] = [],
+  ): Promise<Result<void, AppError>> {
+    if (this.events.get(prev.event.id)?.revision !== prev.revision) {
+      return Promise.resolve(appError('revision_conflict', 'Event was modified concurrently'));
+    }
+    this.events.set(next.event.id, next);
+    // Placement lives on the Shows (one source of truth with the database adapter).
+    for (const p of prev.shows) {
+      if (!next.shows.some((s) => s.showId === p.showId)) {
+        const show = this.shows.get(p.showId);
+        if (show) this.shows.set(show.id, { ...show, eventId: null, roomId: null });
+      }
+    }
+    for (const p of next.shows) {
+      const show = this.shows.get(p.showId);
+      if (show) this.shows.set(show.id, { ...show, eventId: next.event.id, roomId: p.roomId });
+    }
+    this.audit.push(...audit);
+    return Promise.resolve(ok(undefined));
+  }
+
+  // --- Devices (M5) -----------------------------------------------------------------------------
+
+  createPairing(session: PairingSession): Promise<void> {
+    this.pairings.set(session.id, session);
+    return Promise.resolve();
+  }
+
+  findPairingByCodeHash(codeHash: string): Promise<PairingSession | null> {
+    const found = [...this.pairings.values()]
+      .filter((p) => p.codeHash === codeHash && p.status === 'pending')
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+    return Promise.resolve(found ?? null);
+  }
+
+  findPairingBySecretHash(secretHash: string): Promise<PairingSession | null> {
+    return Promise.resolve(
+      [...this.pairings.values()].find((p) => p.secretHash === secretHash) ?? null,
+    );
+  }
+
+  savePairing(prev: PairingSession, next: PairingSession): Promise<Result<void, AppError>> {
+    if (this.pairings.get(prev.id)?.status !== prev.status) {
+      return Promise.resolve(appError('revision_conflict', 'Pairing changed concurrently'));
+    }
+    this.pairings.set(next.id, next);
+    return Promise.resolve(ok(undefined));
+  }
+
+  createDevice(device: Device, audit: readonly AuditRecord[] = []): Promise<void> {
+    this.devices.set(device.id, { device, credentialHash: null });
+    this.audit.push(...audit);
+    return Promise.resolve();
+  }
+
+  async pairDevice(
+    prev: PairingSession,
+    next: PairingSession,
+    device: Device,
+    audit: readonly AuditRecord[] = [],
+  ): Promise<Result<void, AppError>> {
+    const saved = await this.savePairing(prev, next);
+    if (!saved.ok) return saved;
+    await this.createDevice(device, audit);
+    return ok(undefined);
+  }
+
+  findDevice(deviceId: DeviceId): Promise<Device | null> {
+    return Promise.resolve(this.devices.get(deviceId)?.device ?? null);
+  }
+
+  findDeviceByCredentialHash(hash: string): Promise<Device | null> {
+    const found = [...this.devices.values()].find((d) => d.credentialHash === hash);
+    return Promise.resolve(found?.device ?? null);
+  }
+
+  listDevices(scope: OwnerScope): Promise<readonly Device[]> {
+    return Promise.resolve(
+      [...this.devices.values()]
+        .map((d) => d.device)
+        .filter((d) =>
+          scope.showId !== null
+            ? d.scope.showId === scope.showId
+            : d.scope.eventId === scope.eventId,
+        )
+        .sort((a, b) => a.createdAt - b.createdAt),
+    );
+  }
+
+  saveDevice(
+    prev: Device,
+    next: Device,
+    audit: readonly AuditRecord[] = [],
+  ): Promise<Result<void, AppError>> {
+    const stored = this.devices.get(prev.id);
+    if (stored?.device.revision !== prev.revision) {
+      return Promise.resolve(appError('revision_conflict', 'Device was modified concurrently'));
+    }
+    this.devices.set(next.id, { ...stored, device: next });
+    this.audit.push(...audit);
+    return Promise.resolve(ok(undefined));
+  }
+
+  setDeviceCredential(deviceId: DeviceId, credentialHash: string): Promise<void> {
+    const stored = this.devices.get(deviceId);
+    if (stored) this.devices.set(deviceId, { ...stored, credentialHash });
+    return Promise.resolve();
+  }
+
+  removeDevice(deviceId: DeviceId, audit: readonly AuditRecord[] = []): Promise<void> {
+    this.devices.delete(deviceId);
+    this.audit.push(...audit);
+    return Promise.resolve();
+  }
+
+  touchDevice(deviceId: DeviceId, at: EpochMs): Promise<void> {
+    const stored = this.devices.get(deviceId);
+    if (stored)
+      this.devices.set(deviceId, { ...stored, device: { ...stored.device, lastSeenAt: at } });
+    return Promise.resolve();
+  }
 }
+
+const TOKEN_PREFIX: Readonly<Record<TokenKind, string>> = {
+  owner: 'klo',
+  event: 'kle',
+  board: 'klb',
+  device: 'kld',
+  pairing: 'klp',
+};
 
 /** Deterministic token service for tests. Production uses a CSPRNG + SHA-256 (apps/server). */
 export class FakeTokenService implements TokenService {
@@ -231,7 +457,7 @@ export class FakeTokenService implements TokenService {
   constructor(private readonly run = 'test') {}
 
   issue(kind: TokenKind): { token: string; hash: string } {
-    const token = `${kind === 'owner' ? 'klo' : 'klb'}_${this.run}${String(++this.#n)}`;
+    const token = `${TOKEN_PREFIX[kind]}_${this.run}${String(++this.#n)}`;
     return { token, hash: this.hash(token) };
   }
 
@@ -239,10 +465,23 @@ export class FakeTokenService implements TokenService {
     return `fakehash:${token.split('').reverse().join('')}`;
   }
 
+  #r: number | null = null;
+  /** Deterministic per run id (codes differ between runs sharing a database). */
+  randomIndex(n: number): number {
+    let r = this.#r;
+    if (r === null) {
+      r = 7;
+      for (let i = 0; i < this.run.length; i++) r = (r * 31 + this.run.charCodeAt(i)) % 9973;
+    }
+    r = (r * 31 + 11) % 9973;
+    this.#r = r;
+    return r % n;
+  }
+
   kindOf(token: string): TokenKind | null {
-    if (token.startsWith('klo_')) return 'owner';
-    if (token.startsWith('klb_')) return 'board';
-    return null;
+    const prefix = token.slice(0, 3);
+    const found = Object.entries(TOKEN_PREFIX).find(([, p]) => p === prefix);
+    return token[3] === '_' && found ? (found[0] as TokenKind) : null;
   }
 }
 

@@ -2,7 +2,29 @@
 
 ## Phase
 
-**M4 complete and approved (2026-11-09) — Boards + Multi-Queue.** OPEN_QUESTIONS #43-46 resolved in the review and implemented. Workflow: local checks → commit directly on `main` → push → verify CI on `main` (PRs only on explicit request).
+**M5 complete (2026-11-09) — Events, Rooms & Devices**, awaiting review. M4 approved; ACC runs on the UGREEN NAS at `https://acc.klockr.live`. Workflow: local checks → commit directly on `main` → push → verify CI + GHCR publish on `main` (PRs only on explicit request).
+
+## M5 delivered
+
+- optional Event (name, dates, IANA timezone, status) and flat Rooms / Areas (order, active/inactive); a Show is standalone, in an Event without Room, or in exactly one Room (enforced by a composite FK); Quick Timer unchanged
+- Event planning: add/rename/reorder/delete (empty) Rooms; new Show in the Event (inherits its timezone); attach an existing Show (owner of both); move between Rooms / out of a Room / reorder; detach; duplicate — structural only, never touching timers or Current
+- explicit Show duplication: configuration copied, runtime/actuals/Current/suggestions/Messages/locks/audit/shares/Device credentials not; the copy starts clean and idle
+- Event Dashboard (`/event/<id>`) with live status per Room/Show (Current, timer, Next planned/projected, offset, anchor risk, running timers, conflicts, suggestions, locks, Devices) and Room View (`/event/<id>/room/<roomId>`) with room agenda as a view over Show data
+- Event / Room locks (structure only, plus the Show lock for moving a Show), audited Emergency Override; live transport never blocked
+- Event Boards (Room Agenda over a Room's Shows, Central Agenda per Room, Production) on the same Board object/renderer with `room`/`event` sources and server-side audience filtering
+- persistent Devices: `/device` pairing code (10 min, one-time, hashed), manager pairs by code, permanent credential claimed once, assign/reassign/rename/revoke/remove, derived status with sparse last-seen writes, live re-routing on reassignment, `DEVICE UNPAIRED` on revocation, outage-tolerant display
+- Board share management: labelled links, list, revoke (immediate HTTP + realtime cut-off), new links
+- anonymous Event owner grant (ADR-0011); capabilities `event.*`, `room.manage`, `show.create/move/duplicate`, `device.*`, `board.share.manage`; persistent audit for all of it
+- migration `0007_events_rooms_devices` (additive), tested against an M4-filled database and rehearsed as an ACC upgrade with Docker images
+- tests: 370 unit/component (domain 183, contracts 19, application 84, ui 18, server 32, worker 2, web 32), 25 PostgreSQL integration (db 24, server 1), 13 Playwright E2E (Event, Device and share flows added; suite 3× green)
+
+## Known limitations after M5
+
+- Event management is bound to the creating browser (cookie with the anonymous lifetime); no accounts/claim yet (M6) — OPEN_QUESTIONS #47.
+- A Room's "current Show" is derived (#48); New Event dates are entered in browser local time (#49); Show-scoped Devices stay Show-scoped after attaching (#50).
+- Device presence is in memory on the single realtime server; pairing screens poll every 2 s while open.
+- No Event-level audit viewer (records are persisted); no anonymous cleanup job yet.
+- Images are `linux/amd64` only.
 
 ## Deployment slice (2026-11-09) — containers, GHCR, UGREEN ACC
 
@@ -190,9 +212,9 @@ OPEN_QUESTIONS #34-37 resolved in the review.
 
 ## Next milestone
 
-**M5 — Event / Room / Device** (see `docs/IMPLEMENTATION_PLAN.md`). Start only on explicit instruction after the M4 review; OPEN_QUESTIONS #38-40 remain open.
+**M6 — Accounts / collaboration / RBAC / API** (see `docs/IMPLEMENTATION_PLAN.md`). Start only on explicit instruction after the M5 review; OPEN_QUESTIONS #38-40 and #47-50 remain open.
 
-## Decisions that do not block M5
+## Decisions that do not block M6
 
 - concrete magic-link/auth library;
 - transactional email provider;

@@ -27,6 +27,8 @@ export type CreateQuickTimerResponse = z.infer<typeof createQuickTimerResponseSc
 /** POST /api/v1/shows/:showId/board-shares — new read-only Board link credential. */
 export const boardShareRequestSchema = z.object({ boardId: idSchema.optional() });
 export const boardShareResponseSchema = z.object({
+  /** M5: id of the share (for listing/revocation; never the secret). */
+  shareId: idSchema,
   boardId: idSchema,
   boardShareToken: z.string(),
 });
@@ -46,6 +48,15 @@ export const showStateSnapshotSchema = z.object({
     expiresAt: epochMsSchema,
     revision: revisionSchema,
     primaryQueueId: idSchema,
+    /** M5: optional Event / Room context (breadcrumb); null for a standalone Show. */
+    context: z
+      .object({
+        eventId: idSchema,
+        eventName: z.string(),
+        roomId: idSchema.nullable(),
+        roomName: z.string().nullable(),
+      })
+      .nullable(),
   }),
   queues: z.array(queueSnapshotSchema),
   relations: z.array(relationSnapshotSchema),

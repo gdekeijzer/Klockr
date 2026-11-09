@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -27,6 +28,75 @@ export interface ThresholdRuleJson {
 }
 const DEFAULT_RULE = sql`'{"kind":"percent","warningPercent":20,"criticalPercent":5}'::jsonb`;
 
+/**
+ * M5: optional Event above Shows. `revision` is the Event aggregate compare-and-set token
+ * (structure, Rooms, placement, Event Boards, locks); `details_revision` versions the Event's
+ * own fields.
+ */
+export const events = pgTable(
+  'events',
+  {
+    id: uuid('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    startsAt: tstz('starts_at'),
+    endsAt: tstz('ends_at'),
+    timeZone: text('time_zone').notNull(),
+    status: text('status').notNull().default('draft'),
+    createdAt: tstz('created_at').notNull(),
+    updatedAt: tstz('updated_at').notNull(),
+    detailsRevision: integer('details_revision').notNull().default(0),
+    revision: integer('revision').notNull().default(0),
+  },
+  (t) => [
+    check('events_status_check', sql`${t.status} in ('draft', 'active', 'completed', 'archived')`),
+  ],
+);
+
+/** M5: "Room / Area" of an Event. Flat (no nesting). */
+export const rooms = pgTable(
+  'rooms',
+  {
+    id: uuid('id').primaryKey(),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    position: integer('position').notNull(),
+    status: text('status').notNull().default('active'),
+    createdAt: tstz('created_at').notNull(),
+    updatedAt: tstz('updated_at').notNull(),
+    revision: integer('revision').notNull().default(0),
+  },
+  (t) => [
+    check('rooms_status_check', sql`${t.status} in ('active', 'inactive')`),
+    // Target of the composite FK that keeps a Show's Room inside the Show's Event.
+    uniqueIndex('rooms_event_id_uq').on(t.eventId, t.id),
+    index('rooms_event_idx').on(t.eventId),
+  ],
+);
+
+/** M5: structure/configuration locks on an Event or one of its Rooms. */
+export const eventLocks = pgTable(
+  'event_locks',
+  {
+    id: uuid('id').primaryKey(),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade' }),
+    targetKind: text('target_kind').notNull(),
+    targetId: uuid('target_id').notNull(),
+    lockedAt: tstz('locked_at').notNull(),
+    lockedByKind: text('locked_by_kind').notNull(),
+    lockedById: text('locked_by_id').notNull(),
+  },
+  (t) => [
+    check('event_locks_target_kind_check', sql`${t.targetKind} in ('event', 'room')`),
+    uniqueIndex('event_locks_target_uq').on(t.targetKind, t.targetId),
+  ],
+);
+
 /** Standalone operational unit. M1: anonymous Quick Timer Shows only. */
 export const shows = pgTable(
   'shows',
@@ -49,9 +119,23 @@ export const shows = pgTable(
     severeBehindMs: integer('severe_behind_ms').notNull().default(300_000),
     /** M4: compare-and-set revision of the whole Show aggregate. */
     revision: integer('revision').notNull().default(0),
+    /**
+     * M5 placement (written by the Event aggregate): standalone (both null), in an Event without
+     * Room, or in exactly one Room of that Event (composite FK: the Room belongs to the Event).
+     */
+    eventId: uuid('event_id').references((): AnyPgColumn => events.id, { onDelete: 'set null' }),
+    roomId: uuid('room_id'),
+    eventPosition: integer('event_position').notNull().default(0),
   },
   (t) => [
     check('shows_timing_mode_check', sql`${t.timingMode} in ('strict', 'sliding')`),
+    check('shows_room_needs_event_check', sql`${t.roomId} is null or ${t.eventId} is not null`),
+    foreignKey({
+      name: 'shows_event_room_fk',
+      columns: [t.eventId, t.roomId],
+      foreignColumns: [rooms.eventId, rooms.id],
+    }),
+    index('shows_event_idx').on(t.eventId),
     check('shows_ownership_check', sql`${t.ownership} in ('anonymous')`),
     index('shows_expires_at_idx').on(t.expiresAt),
   ],
@@ -192,9 +276,11 @@ export const boards = pgTable(
   'boards',
   {
     id: uuid('id').primaryKey(),
-    showId: uuid('show_id')
-      .notNull()
-      .references(() => shows.id, { onDelete: 'cascade' }),
+    /** Owner: a Show XOR (M5) an Event. */
+    showId: uuid('show_id').references(() => shows.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id').references(() => events.id, { onDelete: 'cascade' }),
+    /** M5: Room of a `room` source (Room Agenda). */
+    sourceRoomId: uuid('source_room_id').references(() => rooms.id, { onDelete: 'cascade' }),
     preset: text('preset').notNull(),
     name: text('name').notNull().default('Speaker Board'),
     /** Exactly one primary audience. */
@@ -229,7 +315,12 @@ export const boards = pgTable(
       'boards_audience_check',
       sql`${t.audience} in ('stage', 'production', 'backstage', 'public', 'broadcast')`,
     ),
-    check('boards_source_mode_check', sql`${t.sourceMode} in ('primary', 'all', 'selected')`),
+    check(
+      'boards_source_mode_check',
+      sql`${t.sourceMode} in ('primary', 'all', 'selected', 'room', 'event')`,
+    ),
+    check('boards_owner_check', sql`(${t.showId} is null) <> (${t.eventId} is null)`),
+    index('boards_event_idx').on(t.eventId),
   ],
 );
 
@@ -340,17 +431,24 @@ export const accessGrants = pgTable(
   {
     id: uuid('id').primaryKey(),
     kind: text('kind').notNull(),
-    showId: uuid('show_id')
-      .notNull()
-      .references(() => shows.id, { onDelete: 'cascade' }),
+    /** Scope: a Show XOR (M5) an Event. */
+    showId: uuid('show_id').references(() => shows.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id').references(() => events.id, { onDelete: 'cascade' }),
     boardId: uuid('board_id').references(() => boards.id, { onDelete: 'cascade' }),
+    /** M5: optional label of a Board share link (management only). */
+    label: text('label'),
     tokenHash: text('token_hash').notNull().unique(),
     createdAt: tstz('created_at').notNull(),
     expiresAt: tstz('expires_at'),
     revokedAt: tstz('revoked_at'),
   },
   (t) => [
-    check('access_grants_kind_check', sql`${t.kind} in ('anonymous_owner', 'board_share')`),
+    check(
+      'access_grants_kind_check',
+      sql`${t.kind} in ('anonymous_owner', 'anonymous_event_owner', 'board_share')`,
+    ),
+    check('access_grants_owner_check', sql`(${t.showId} is null) <> (${t.eventId} is null)`),
+    index('access_grants_event_idx').on(t.eventId),
     check(
       'access_grants_scope_check',
       sql`(${t.kind} = 'board_share') = (${t.boardId} is not null)`,
@@ -434,9 +532,9 @@ export const auditEvents = pgTable(
     id: uuid('id').primaryKey(),
     /** Insertion order (stable ordering for records with equal timestamps). */
     seq: bigint('seq', { mode: 'number' }).generatedAlwaysAsIdentity(),
-    showId: uuid('show_id')
-      .notNull()
-      .references(() => shows.id, { onDelete: 'cascade' }),
+    /** Scope: a Show and/or (M5) an Event. */
+    showId: uuid('show_id').references(() => shows.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id').references(() => events.id, { onDelete: 'cascade' }),
     at: tstz('at').notNull(),
     actorKind: text('actor_kind').notNull(),
     actorId: text('actor_id').notNull(),
@@ -445,5 +543,9 @@ export const auditEvents = pgTable(
     resourceId: text('resource_id').notNull(),
     details: jsonb('details').$type<Record<string, unknown>>().notNull(),
   },
-  (t) => [index('audit_events_show_at_idx').on(t.showId, t.at)],
+  (t) => [
+    index('audit_events_show_at_idx').on(t.showId, t.at),
+    index('audit_events_event_at_idx').on(t.eventId, t.at),
+    check('audit_events_scope_check', sql`${t.showId} is not null or ${t.eventId} is not null`),
+  ],
 );

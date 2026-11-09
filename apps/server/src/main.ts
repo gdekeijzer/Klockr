@@ -29,6 +29,7 @@ const hub = new RealtimeHub(systemClock);
 const services = createServices({
   clock: systemClock,
   events: hub,
+  presence: hub,
   persistence: {
     store: new PgShowStore(database.db),
     idempotency: new PgIdempotencyStore(database.db),

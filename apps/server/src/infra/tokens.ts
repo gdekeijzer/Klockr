@@ -1,7 +1,13 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 import type { TokenKind, TokenService } from '@klockr/application';
 
-const PREFIX: Readonly<Record<TokenKind, string>> = { owner: 'klo_', board: 'klb_' };
+const PREFIX: Readonly<Record<TokenKind, string>> = {
+  owner: 'klo_',
+  event: 'kle_',
+  board: 'klb_',
+  device: 'kld_',
+  pairing: 'klp_',
+};
 
 /**
  * Opaque credentials: 32 bytes (256 bits) from the OS CSPRNG, base64url, with a type prefix so
@@ -20,8 +26,13 @@ export class NodeTokenService implements TokenService {
 
   kindOf(token: string): TokenKind | null {
     if (token.length < 20 || token.length > 100) return null;
-    if (token.startsWith(PREFIX.owner)) return 'owner';
-    if (token.startsWith(PREFIX.board)) return 'board';
-    return null;
+    const found = (Object.entries(PREFIX) as [TokenKind, string][]).find(([, p]) =>
+      token.startsWith(p),
+    );
+    return found ? found[0] : null;
+  }
+
+  randomIndex(n: number): number {
+    return randomInt(n);
   }
 }

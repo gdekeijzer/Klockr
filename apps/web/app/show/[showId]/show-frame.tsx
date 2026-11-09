@@ -63,6 +63,25 @@ export function ShowFrame(props: {
           </Link>
         </nav>
         <div className={styles.showName}>
+          {rt.show?.context && (
+            <span className={styles.rowSub} data-testid="show-context">
+              <Link className={styles.link} href={`/event/${rt.show.context.eventId}`}>
+                {rt.show.context.eventName}
+              </Link>
+              {rt.show.context.roomId && (
+                <>
+                  {' / '}
+                  <Link
+                    className={styles.link}
+                    href={`/event/${rt.show.context.eventId}/room/${rt.show.context.roomId}`}
+                  >
+                    {rt.show.context.roomName}
+                  </Link>
+                </>
+              )}
+              {' / '}
+            </span>
+          )}
           {rt.show?.title ?? 'Quick Timer'}
           <span className={`${styles.showId} mono`} title={showId} data-testid="show-id">
             {showId.slice(0, 8)}

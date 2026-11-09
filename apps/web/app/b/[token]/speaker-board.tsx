@@ -18,6 +18,15 @@ export function SpeakerBoard({ token }: { token: string }) {
   useWakeLock();
   const controlsVisible = usePointerActivity();
 
+  if (rt.revoked) {
+    return (
+      <main className={styles.board}>
+        <p className={styles.message} data-testid="board-revoked">
+          This board link has been revoked.
+        </p>
+      </main>
+    );
+  }
   if (rt.denied) {
     return (
       <main className={styles.board}>

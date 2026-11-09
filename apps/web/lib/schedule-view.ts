@@ -5,6 +5,7 @@ import {
   GroupId,
   QueueId,
   QueueItemId,
+  RoomId,
   ShowId,
   type Board,
   type QueueAggregate,
@@ -121,10 +122,13 @@ export function showAggregateFromSnapshot(
       ...b,
       id: BoardId(b.id),
       showId,
+      eventId: null,
       sources:
         b.sources.kind === 'selected'
           ? { kind: 'selected', queueIds: b.sources.queueIds.map(QueueId) }
-          : { kind: b.sources.kind },
+          : b.sources.kind === 'room'
+            ? { kind: 'room', roomId: RoomId(b.sources.roomId) }
+            : { kind: b.sources.kind },
       createdAt: 0,
       updatedAt: 0,
     })),
