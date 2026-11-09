@@ -1,5 +1,16 @@
 # Changelog
 
+## M4 — 2026-11-09 — Boards + Multi-Queue
+
+- domain: `ShowAggregate` as the single consistency boundary (one Show revision for CAS, per-Queue revisions for gating); peer Queues with discipline, position and one Primary; relations with offset, preserve-offset, cycle checks and CONFLICT; multi-Queue schedule engine (`calculateShowSchedule`); suggested follow (pending / accepted / ignored / stale, never auto-follow); `moveItemToQueue`; audiences and item visibility / published notes; Board configuration with 7 presets and a constrained component model; Messages with audiences, priority and TTL; capabilities `queue.create`, `queue.delete`, `relation.manage`, `board.manage`, `message.send`;
+- application: `mutateShow` as the one mutation path for all Show/Queue/timer commands (permission → idempotency → revision → lock gate/override audit → apply → suggestion reconcile + normalisation → atomic save → events); server-side scoped `toBoardSnapshot`; Board preview; per-Board share links;
+- contracts: Queue/relation/suggestion/Board/Message commands, `ShowStateSnapshot`, `BoardStateSnapshot`, `ShowCommandResponse`, realtime `show.state`;
+- db: migration `0005_multi_queue_boards` (Show revision, Queue discipline/position, item visibility/notes audiences, Board configuration, Board sources, relations, suggestions, Messages, data migration of existing Boards) and `saveShowAggregate` in one transaction;
+- server: new commands on the commands endpoint, Board preview endpoint, per-Board share, realtime `show.state` to operators and scoped `board.snapshot` per Board (no raw timer events to Boards);
+- web: Operator Queue tabs (★ Primary, running dot, SUGGESTED), suggestion banner with GO / Ignore, running timers of other Queues, Message panel; Master multi-Queue overview, structure with Queue add/move, Queue panel (Primary, discipline, delete), List / Timeline, relations, visibility and Move to Queue in the inspector; Boards page with preview and configuration; generic `BoardView` renderer for all presets;
+- tests: 325 unit/component, 22 PostgreSQL integration, 10 Playwright E2E (multi-Queue/relations/suggestions flow and Boards/audiences/Messages/outage flow added); full E2E suite 3× repeated green;
+- docs: M4 sections in QUEUES_SCHEDULING, BOARDS_AUDIENCES, DATA_MODEL, API_CONTRACT, REALTIME_OFFLINE, SECURITY_MODEL; OPEN_QUESTIONS #43-46.
+
 ## M3 — 2026-11-10 — Scheduling + Master
 
 - review: M3 approved; OPEN_QUESTIONS #41 (Strict never projects an explicitly planned item earlier) and #42 (timer duration = planned duration; live adjustments never change it) resolved.

@@ -167,3 +167,13 @@ Writes go through `PgShowStore.saveQueue(prev, next)`: one transaction that clai
 | `audit_events` (new) | id, seq (identity, stable order), show_id, at, actor_kind/id, action, resource_kind/id, details jsonb |
 
 Not stored: chained planned times, projected times, offsets, statuses, recovery, warnings (all derived by the domain engine). Locks, requests and audit records are written in the same `saveQueue` transaction as the change.
+
+## Implemented in M4 (migration `0005_multi_queue_boards`)
+
+- `shows.revision` — Show-level compare-and-set token for the whole Show aggregate.
+- `queues.discipline` (free text, e.g. Program/Audio/Lighting) and `position`; the legacy `purpose` column is kept with default `program` (no longer used).
+- `queue_items.visibility text[]` (NULL = all audiences) and `notes_audiences text[]` (default empty).
+- `boards`: `name`, `audience`, `follow_primary`, `components jsonb`, `presentation jsonb`, `revision`, `updated_at`; checks on preset and audience. Data migration: existing `speaker` Boards become `speaker_confidence` / "Speaker Board" / `stage`; Queues get discipline `Program`.
+- `board_sources (board_id, queue_id, position)` for explicit sources.
+- `item_relations` (source/target item, offset, preserve_offset, active), `queue_suggestions` (pending/accepted/ignored/stale with the target Current at creation) and `messages` (text, audiences, board_ids, priority, expires_at).
+- `saveShowAggregate` writes the full diff (Queues, Groups, Items, timers with per-timer CAS, relations, suggestions, Boards, sources, Messages, locks, unlock requests, audit) in one transaction guarded by `shows.revision`.

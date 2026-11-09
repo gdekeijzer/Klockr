@@ -122,3 +122,10 @@ Anonymous cleanup verifies expiry, active-use protection and grace/safety policy
 - Capabilities `schedule.read`, `schedule.manage`, `lock.manage`, `lock.request`, `lock.override`, `audit.read` (bundled in `anonymous_owner`; never in `board_share`).
 - Locks are enforced in the application layer before the domain operation, atomically with the change (same aggregate). Emergency Override is never implicit: the client must resend the command with an explicit reason, the server checks `lock.override`, and the audit record is written in the same transaction as the overridden change.
 - The audit trail is only readable with `audit.read` via the owner credential; board tokens get 401/403.
+
+## Implemented in M4
+
+- Board projection is filtered **server-side** before anything reaches the display browser: source Queues only, audience visibility, notes only when explicitly published to the audience *and* the Notes component is enabled, data only for enabled components, Messages only for the Board's audience/id. No audit, lock details, unrelated Queues or management metadata are sent. The React UI is not the security boundary (E2E asserts the raw token response does not contain hidden items).
+- Board share tokens are per Board (hashed at rest) and grant `board.read` only; a Board token cannot read Show State or mutate anything.
+- Message text is plain text (≤ 120 chars), rendered as text, never HTML.
+- New management commands are permission-gated by capability (`queue.create`, `queue.delete`, `relation.manage`, `board.manage`, `message.send`) and go through the same lock gate and audit as earlier commands.
