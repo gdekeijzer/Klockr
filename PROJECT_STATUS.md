@@ -121,6 +121,7 @@
 - PostgreSQL container + named volume in each ACC/PRD project
 - build once; promote exact images from ACC to PRD
 - production deployment explicit/manual
+- canonical production / public domain: `klockr.live` (configuration, never hardcoded in runtime code)
 
 ## Next milestone
 
@@ -130,7 +131,6 @@
 
 - concrete magic-link/auth library;
 - transactional email provider;
-- production domain;
 - object storage (only if/when uploaded Board assets enter scope);
 - registry/reverse proxy details;
 - backup target and retention;

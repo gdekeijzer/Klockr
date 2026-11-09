@@ -4,7 +4,7 @@ These questions are deliberately deferred. Claude must not silently invent produ
 
 ## Product / naming
 
-1. Production domain and final trademark/domain validation for KLOCKR.
+1. ~~Production domain~~ — **Resolved (2026-11-09):** the canonical production / public domain is `klockr.live`. Trademark validation of the KLOCKR name remains a business task outside the repository.
 2. Exact end-user vocabulary in each preset: `Queue`, `Cue List`, `Rundown`, etc.
 
 ## Timer UX
@@ -60,7 +60,7 @@ Accepted: dedicated server, DEV/TST local/CI, ACC + PRD as separate Docker Compo
 
 Remaining:
 
-24. ACC and PRD hostnames/domains.
+24. ACC hostname/domain. (PRD resolved: `klockr.live`.)
 25. Container registry/provider and image naming convention.
 26. Reverse proxy choice/configuration if not already standardized on the dedicated server.
 27. Backup destination, schedule, encryption and retention.

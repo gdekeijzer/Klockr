@@ -6,9 +6,11 @@ This repository is the approved product, UX and technical baseline for **KLOCKR*
 
 A first-time user must be able to start a useful timer within seconds, while the same model scales to multi-queue, multi-room and multi-device live productions.
 
+Canonical production domain: **https://klockr.live** (web, `/api/v1` API and `/realtime` transport under one origin). The domain is configuration, not code: the same images run on ACC and PRD.
+
 ## Status
 
-**M0 (repository bootstrap + timer kernel) complete.** See `PROJECT_STATUS.md` and `docs/DEVELOPMENT.md` to run it locally.
+**M2 (Queue operations) complete.** See `PROJECT_STATUS.md` and `docs/DEVELOPMENT.md` to run it locally.
 
 Product behavior, design direction, architecture boundaries, identity model and environment strategy have been agreed. Remaining open questions are intentionally deferred until the feature that needs them.
 

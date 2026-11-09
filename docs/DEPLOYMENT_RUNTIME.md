@@ -65,7 +65,18 @@ klockr-prd
   postgres
 ```
 
-PRD has completely separate secrets, database volume and hostname.
+PRD has completely separate secrets, database volume and hostname. The PRD hostname is the canonical public domain **`klockr.live`** (`https://klockr.live/`, with `/api/v1` and `/realtime` routed by the reverse proxy to the server).
+
+## Public URL configuration
+
+Images are identical on ACC and PRD, so nothing environment-specific is baked in:
+
+| Variable | ACC | PRD | Local |
+| --- | --- | --- | --- |
+| `KLOCKR_PUBLIC_URL` (absolute links without a request origin, e.g. future e-mails) | ACC URL (tbd, `OPEN_QUESTIONS.md` #24) | `https://klockr.live` | `http://localhost:3000` |
+| `COOKIE_SECURE` | `true` | `true` | `false` |
+
+The web app itself uses relative routes and the request origin; `klockr.live` is never hardcoded in runtime code.
 
 Deployment to PRD requires an explicit promotion action. Claude Code must not silently deploy production as a side effect of implementation.
 

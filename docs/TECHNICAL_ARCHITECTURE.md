@@ -42,13 +42,20 @@ Choose stable maintained package versions at bootstrap time; document selected v
 
 ## One public product domain
 
-Web, API and realtime remain accessible under one public product domain through reverse-proxy routing, e.g.:
+The canonical production / public domain is **`klockr.live`** (decision 2026-11-09). Web, API and realtime remain accessible under that one origin through reverse-proxy routing:
 
 ```text
-https://klockr.example/                 web
-https://klockr.example/api/v1/...       server API
-https://klockr.example/realtime/...     realtime transport
+https://klockr.live/                 web
+https://klockr.live/api/v1/...       server API
+https://klockr.live/realtime/...     realtime transport
 ```
+
+Rules:
+
+- `klockr.live` is the PRD public URL; ACC uses its own hostname (not yet decided, `OPEN_QUESTIONS.md` #24) with the **same images**.
+- Runtime code never hardcodes a domain. Internal routes stay relative (`/api/v1`, `/realtime`, `/show/<id>`, `/show/<id>/edit`, `/b/<token>`); links shown in the UI (e.g. the Speaker Board link) are built from the current origin.
+- Where an absolute URL must be produced without a request origin (e.g. future magic-link e-mails from the worker), it comes from the environment variable `KLOCKR_PUBLIC_URL` (`https://klockr.live` in PRD, the ACC URL in ACC, `http://localhost:3000` locally).
+- Credential cookies are host-only (no `Domain` attribute), so an ACC cookie can never be sent to PRD or vice versa.
 
 The reverse proxy may be managed outside the application Compose project on the dedicated server.
 

@@ -219,6 +219,7 @@ Do not perform broad opportunistic refactors during an unrelated feature unless 
 - Background cleanup/email/housekeeping belongs in `apps/worker`, not the live timing path.
 - Build immutable application images once; PRD promotes the exact images accepted on ACC.
 - Never silently deploy PRD. Production promotion is explicit and user-controlled.
+- The canonical production / public domain is `klockr.live` (web at `https://klockr.live/`, API at `/api/v1`, realtime at `/realtime`). Do not hardcode it in runtime code: ACC and PRD run the same images, so links and routing use relative paths (`/api/v1`, `/realtime`, `/show/...`, `/b/...`) or the request origin, and any environment-specific absolute URL comes from configuration (`KLOCKR_PUBLIC_URL`).
 
 ## 14. Repository conventions
 

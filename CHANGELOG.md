@@ -9,7 +9,7 @@
 - server: Queue commands on `/api/v1/shows/:showId/commands`, per-audience realtime rooms, Board projection pushed on every Queue change;
 - web: Operator View rebuilt around Current / Next / Queue preview with separate END and END + NEXT, Queue Editor (`/show/<id>/edit`) with presets, inspector, drag & drop, Groups and inherited warning settings, Speaker Board follows Current;
 - tests: 231 unit/component, 12 PostgreSQL integration (incl. atomic END + NEXT and restart reload), 6 Playwright E2E;
-- docs: Queue implementation notes, END-with-live-timer decision, threshold inheritance, API/realtime/security/data-model M2 sections, OPEN_QUESTIONS #34-37.
+- docs: canonical production domain `klockr.live` recorded (CLAUDE.md, README, TECHNICAL_ARCHITECTURE, DEPLOYMENT_RUNTIME, OPEN_QUESTIONS #1/#24; `KLOCKR_PUBLIC_URL` config, no hardcoded domain in runtime code); Queue implementation notes, END-with-live-timer decision, threshold inheritance, API/realtime/security/data-model M2 sections, OPEN_QUESTIONS #34-37.
 
 ## M1 — 2026-11-09 — Anonymous Quick Timer vertical slice
 
