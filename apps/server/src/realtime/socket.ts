@@ -146,6 +146,6 @@ export function attachRealtime(
     })();
   });
 
-  hub.attach(io, { boardOfShow: (showId) => services.shows.getBoardOfShow(showId) });
+  hub.attach(io, { showMeta: (showId) => services.shows.getShow(showId) });
   return io;
 }

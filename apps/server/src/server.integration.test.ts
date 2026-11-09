@@ -33,9 +33,9 @@ describe('server + PostgreSQL (requires PostgreSQL)', () => {
     const state = (await (
       await fetch(`${first.baseUrl}/api/v1/shows/${showId}/state`, { headers: { cookie } })
     ).json()) as {
-      queue: { items: { id: string }[] };
+      queues: { items: { id: string }[] }[];
     };
-    const itemId = state.queue.items[0]?.id ?? '';
+    const itemId = state.queues[0]?.items[0]?.id ?? '';
 
     const start = await fetch(`${first.baseUrl}/api/v1/shows/${showId}/commands`, {
       method: 'POST',
@@ -57,7 +57,7 @@ describe('server + PostgreSQL (requires PostgreSQL)', () => {
       });
       expect(reloaded.status).toBe(200);
       expect(await reloaded.json()).toMatchObject({
-        queue: { currentItemId: itemId, items: [{ timer: { status: 'running', revision: 1 } }] },
+        queues: [{ currentItemId: itemId, items: [{ timer: { status: 'running', revision: 1 } }] }],
       });
 
       const board = await fetch(`${second.baseUrl}/api/v1/board/state`, {
@@ -67,7 +67,7 @@ describe('server + PostgreSQL (requires PostgreSQL)', () => {
       expect(await board.json()).toMatchObject({ timer: { status: 'running', revision: 1 } });
 
       const socket = second.connect({ role: 'board', boardShareToken });
-      expect((await nextEvent(socket, 'board.snapshot')).timer?.revision).toBe(1);
+      expect((await nextEvent(socket, 'board.snapshot')).queues[0]?.timers[0]?.revision).toBe(1);
 
       const mutate = await fetch(`${second.baseUrl}/api/v1/shows/${showId}/commands`, {
         method: 'POST',
