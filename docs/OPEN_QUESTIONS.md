@@ -68,8 +68,8 @@ Remaining:
 29. Production RPO/RTO targets for claimed Shows.
 30. Licensing/subscription/entitlement model.
 
-## Raised during M0 (timer kernel)
+## Raised during M0 (timer kernel) — all resolved in the M0 review (2026-11-09)
 
-31. Confirm START after STOP restarts from the full duration (current implementation) rather than continuing from the stopped value.
-32. Confirm continuous overtime adjustment past zero (`-30` at `+00:10` -> `00:20` remaining).
-33. Should END be allowed for an item whose timer is `idle` or `stopped` (e.g. ending a never-started item)? Currently rejected at the timer level; queue-level skip/end semantics belong to M2.
+31. ~~START after STOP~~ — **Resolved:** START on a stopped timer restarts from the full configured duration (functionally RESTART); previous-run adjustments do not carry over. UI labels the action RESTART in stopped state. See `TIMER_ENGINE.md`.
+32. ~~Adjustment crossing zero~~ — **Resolved:** adjustment may cross zero in both directions (`02:00 +00:30 -> 02:30`, `+00:10 -00:30 -> 00:20`, `+02:14 +00:30 -> +02:44`). Overtime stays derived.
+33. ~~END on idle/stopped timer~~ — **Resolved** by separating Timer from Queue Item END: timer states are `idle | running | paused | stopped`; END / NEXT is a Queue Item / show-control command that may also apply to items without a timer or with a stopped timer. Introduced with Queue Items.

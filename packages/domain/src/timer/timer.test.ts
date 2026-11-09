@@ -7,7 +7,6 @@ import {
   configureTimer,
   createTimer,
   deriveTimer,
-  endTimer,
   pauseTimer,
   resumeTimer,
   startTimer,
@@ -197,27 +196,6 @@ describe('time adjustment', () => {
     expect(view(state).remainingMs).toBe(6 * MINUTE_MS);
   });
 
-  it('adjusts the displayed overtime value in overtime: +30 at +02:14 is +02:44', () => {
-    const { clock, timer, view } = setup(MINUTE_MS);
-    let state = unwrap(startTimer(timer, clock.now()));
-    clock.advance(MINUTE_MS + 2 * MINUTE_MS + 14 * SECOND_MS);
-    expect(view(state).overtimeMs).toBe(2 * MINUTE_MS + 14 * SECOND_MS);
-
-    state = unwrap(adjustTimer(state, 30 * SECOND_MS, clock.now()));
-    expect(view(state)).toMatchObject({
-      isOvertime: true,
-      overtimeMs: 2 * MINUTE_MS + 44 * SECOND_MS,
-    });
-  });
-
-  it('treats a negative adjustment past zero in overtime continuously', () => {
-    const { clock, timer, view } = setup(MINUTE_MS);
-    let state = unwrap(startTimer(timer, clock.now()));
-    clock.advance(MINUTE_MS + 10 * SECOND_MS);
-    state = unwrap(adjustTimer(state, -30 * SECOND_MS, clock.now()));
-    expect(view(state)).toMatchObject({ isOvertime: false, remainingMs: 20 * SECOND_MS });
-  });
-
   it('can push a countdown into overtime with a large negative adjustment', () => {
     const { clock, timer, view } = setup(MINUTE_MS);
     let state = unwrap(startTimer(timer, clock.now()));
@@ -233,17 +211,17 @@ describe('time adjustment', () => {
     expect(view(state).remainingMs).toBe(12 * 60 * MINUTE_MS + MINUTE_MS);
   });
 
-  it('rejects zero, fractional, out-of-range and post-run adjustments', () => {
+  it('rejects zero, fractional, out-of-range and stopped-state adjustments', () => {
     const { clock, timer } = setup();
     expect(adjustTimer(timer, 0, clock.now()).ok).toBe(false);
     expect(adjustTimer(timer, 0.5, clock.now()).ok).toBe(false);
     expect(adjustTimer(timer, 8 * 24 * 60 * MINUTE_MS, clock.now()).ok).toBe(false);
 
     const running = unwrap(startTimer(timer, clock.now()));
-    const ended = unwrap(endTimer(running, clock.advance(SECOND_MS)));
-    expect(adjustTimer(ended, SECOND_MS, clock.now())).toEqual({
+    const stopped = unwrap(stopTimer(running, clock.advance(SECOND_MS)));
+    expect(adjustTimer(stopped, SECOND_MS, clock.now())).toEqual({
       ok: false,
-      error: { code: 'invalid_transition', command: 'adjust', status: 'ended' },
+      error: { code: 'invalid_transition', command: 'adjust', status: 'stopped' },
     });
   });
 
@@ -262,58 +240,130 @@ describe('time adjustment', () => {
   });
 });
 
-describe('STOP vs END', () => {
-  it('STOP halts without ending; START afterwards restarts from the full duration', () => {
+describe('adjustment contract examples (zero boundary may be crossed both ways)', () => {
+  /** Start a 1-minute countdown and advance so that the signed remaining time is `remainingMs`. */
+  function runningAt(remainingMs: number) {
+    const { clock, timer, view } = setup(MINUTE_MS);
+    const state = unwrap(startTimer(timer, clock.now()));
+    clock.advance(MINUTE_MS - remainingMs);
+    return { clock, state, view };
+  }
+
+  it('02:00 remaining + 00:30 -> 02:30 remaining', () => {
+    const { clock, timer, view } = setup(2 * MINUTE_MS);
+    const state = unwrap(
+      adjustTimer(unwrap(startTimer(timer, clock.now())), 30 * SECOND_MS, clock.now()),
+    );
+    expect(view(state)).toMatchObject({
+      isOvertime: false,
+      remainingMs: 2 * MINUTE_MS + 30 * SECOND_MS,
+    });
+  });
+
+  it('+00:10 overtime - 00:30 -> 00:20 remaining', () => {
+    const { clock, state, view } = runningAt(-10 * SECOND_MS);
+    expect(view(state)).toMatchObject({ isOvertime: true, overtimeMs: 10 * SECOND_MS });
+    const adjusted = unwrap(adjustTimer(state, -30 * SECOND_MS, clock.now()));
+    expect(view(adjusted)).toMatchObject({ isOvertime: false, remainingMs: 20 * SECOND_MS });
+  });
+
+  it('+02:14 overtime + 00:30 -> +02:44 overtime', () => {
+    const { clock, state, view } = runningAt(-(2 * MINUTE_MS + 14 * SECOND_MS));
+    const adjusted = unwrap(adjustTimer(state, 30 * SECOND_MS, clock.now()));
+    expect(view(adjusted)).toMatchObject({
+      isOvertime: true,
+      overtimeMs: 2 * MINUTE_MS + 44 * SECOND_MS,
+    });
+  });
+
+  it('overtime is derived, never persisted: the stored state has no overtime field', () => {
+    const { clock, state } = runningAt(-5 * SECOND_MS);
+    const adjusted = unwrap(adjustTimer(state, 30 * SECOND_MS, clock.now()));
+    expect(Object.keys(adjusted).sort()).toEqual([
+      'adjustmentMs',
+      'durationMs',
+      'mode',
+      'pausedAt',
+      'pausedTotalMs',
+      'revision',
+      'startedAt',
+      'status',
+      'stoppedAt',
+    ]);
+  });
+});
+
+describe('STOP and RESTART', () => {
+  it('stopped -> start restarts from the full configured duration', () => {
     const { clock, timer, view } = setup(10 * MINUTE_MS);
     let state = unwrap(startTimer(timer, clock.now()));
-    state = unwrap(adjustTimer(state, MINUTE_MS, clock.now()));
     clock.advance(3 * MINUTE_MS);
     state = unwrap(stopTimer(state, clock.now()));
     expect(state.status).toBe('stopped');
-    expect(state.endedAt).toBeNull();
 
     clock.advance(MINUTE_MS);
-    expect(view(state).remainingMs).toBe(8 * MINUTE_MS);
+    expect(view(state).remainingMs).toBe(7 * MINUTE_MS);
 
     state = unwrap(startTimer(state, clock.now()));
-    expect(state.stoppedAt).toBeNull();
+    expect(state).toMatchObject({ status: 'running', stoppedAt: null, startedAt: clock.now() });
     expect(view(state).remainingMs).toBe(10 * MINUTE_MS);
   });
 
-  it('END finishes the timer; it cannot be restarted, resumed or stopped', () => {
+  it('adjustments from the previous run do not leak into the restarted run', () => {
     const { clock, timer, view } = setup(10 * MINUTE_MS);
-    let state = unwrap(startTimer(timer, clock.now()));
-    clock.advance(4 * MINUTE_MS);
-    state = unwrap(endTimer(state, clock.now()));
-    expect(state).toMatchObject({ status: 'ended', endedAt: clock.now(), stoppedAt: null });
-
+    let state = unwrap(adjustTimer(timer, MINUTE_MS, clock.now())); // pre-start adjustment
+    state = unwrap(startTimer(state, clock.now()));
+    state = unwrap(adjustTimer(state, 2 * MINUTE_MS, clock.now()));
     clock.advance(MINUTE_MS);
-    expect(view(state).remainingMs).toBe(6 * MINUTE_MS);
-    expect(startTimer(state, clock.now()).ok).toBe(false);
-    expect(resumeTimer(state, clock.now()).ok).toBe(false);
-    expect(stopTimer(state, clock.now()).ok).toBe(false);
+    state = unwrap(stopTimer(state, clock.now()));
+    expect(view(state).remainingMs).toBe(12 * MINUTE_MS);
+
+    state = unwrap(startTimer(state, clock.now()));
+    expect(state.adjustmentMs).toBe(0);
+    expect(view(state).remainingMs).toBe(10 * MINUTE_MS);
   });
 
-  it('STOP and END from paused fold the open pause interval', () => {
+  it('restart after an overtime run starts cleanly from the full duration', () => {
+    const { clock, timer, view } = setup(MINUTE_MS);
+    let state = unwrap(startTimer(timer, clock.now()));
+    clock.advance(3 * MINUTE_MS);
+    state = unwrap(stopTimer(state, clock.now()));
+    expect(view(state)).toMatchObject({ isOvertime: true, overtimeMs: 2 * MINUTE_MS });
+    state = unwrap(startTimer(state, clock.now()));
+    expect(view(state)).toMatchObject({ isOvertime: false, remainingMs: MINUTE_MS });
+  });
+
+  it('STOP from paused folds the open pause interval', () => {
     const { clock, timer, view } = setup(10 * MINUTE_MS);
     let state = unwrap(startTimer(timer, clock.now()));
     clock.advance(MINUTE_MS);
     state = unwrap(pauseTimer(state, clock.now()));
     clock.advance(5 * MINUTE_MS);
-
     const stopped = unwrap(stopTimer(state, clock.now()));
     expect(stopped.pausedTotalMs).toBe(5 * MINUTE_MS);
     expect(view(stopped).remainingMs).toBe(9 * MINUTE_MS);
-
-    const ended = unwrap(endTimer(state, clock.now()));
-    expect(ended.pausedTotalMs).toBe(5 * MINUTE_MS);
-    expect(view(ended).remainingMs).toBe(9 * MINUTE_MS);
   });
 
-  it('cannot STOP or END a timer that never started', () => {
+  it('cannot STOP a timer that never started, nor STOP twice', () => {
     const { clock, timer } = setup();
     expect(stopTimer(timer, clock.now()).ok).toBe(false);
-    expect(endTimer(timer, clock.now()).ok).toBe(false);
+    const stopped = unwrap(stopTimer(unwrap(startTimer(timer, clock.now())), clock.now()));
+    expect(stopTimer(stopped, clock.now())).toEqual({
+      ok: false,
+      error: { code: 'invalid_transition', command: 'stop', status: 'stopped' },
+    });
+  });
+
+  it('the timer state set is exactly idle | running | paused | stopped', () => {
+    const { clock, timer } = setup();
+    const seen = new Set<string>([timer.status]);
+    let state = unwrap(startTimer(timer, clock.now()));
+    seen.add(state.status);
+    state = unwrap(pauseTimer(state, clock.advance(SECOND_MS)));
+    seen.add(state.status);
+    state = unwrap(stopTimer(state, clock.advance(SECOND_MS)));
+    seen.add(state.status);
+    expect([...seen].sort()).toEqual(['idle', 'paused', 'running', 'stopped']);
   });
 });
 

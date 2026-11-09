@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { commandSchema, durationMsSchema, epochMsSchema, idSchema, revisionSchema } from './common';
 
 export const timerModeSchema = z.enum(['countdown', 'countup']);
-export const timerStatusSchema = z.enum(['idle', 'running', 'paused', 'stopped', 'ended']);
+export const timerStatusSchema = z.enum(['idle', 'running', 'paused', 'stopped']);
 
 const timerTarget = z.object({ queueItemId: idSchema });
 
@@ -16,11 +16,11 @@ export const adjustTimerCommandSchema = commandSchema(
     deltaMs: durationMsSchema.refine((v) => v !== 0, 'deltaMs must be non-zero'),
   }),
 );
-/**
- * END of a Queue Item. In M0 this only ends the item's timer; current/next orchestration and
- * END+NEXT are added at queue level in M2. STOP is never an alias for END.
+/*
+ * There is deliberately no timer END command. END / NEXT ends a Queue Item (also one without a
+ * timer) and is introduced with Queue Items as a Queue Item / show-control command.
+ * STOP is the only way to halt a timer and is never an alias for END.
  */
-export const endItemCommandSchema = commandSchema('item.end', timerTarget);
 
 export const timerCommandSchema = z.discriminatedUnion('type', [
   startTimerCommandSchema,
@@ -28,7 +28,6 @@ export const timerCommandSchema = z.discriminatedUnion('type', [
   resumeTimerCommandSchema,
   stopTimerCommandSchema,
   adjustTimerCommandSchema,
-  endItemCommandSchema,
 ]);
 export type TimerCommandDto = z.infer<typeof timerCommandSchema>;
 export type TimerCommandType = TimerCommandDto['type'];
@@ -47,7 +46,6 @@ export const timerSnapshotSchema = z.object({
   pausedAt: epochMsSchema.nullable(),
   pausedTotalMs: z.int().nonnegative(),
   stoppedAt: epochMsSchema.nullable(),
-  endedAt: epochMsSchema.nullable(),
   revision: revisionSchema,
   serverTime: epochMsSchema,
 });

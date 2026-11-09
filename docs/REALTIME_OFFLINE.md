@@ -75,7 +75,8 @@ V1 can begin with a single authoritative realtime process if deployment constrai
 
 Prefer domain/application events for discrete transitions:
 
-- timer started/paused/resumed/stopped/ended/adjusted;
+- timer started/paused/resumed/stopped/adjusted;
+- Queue Item ended (END / NEXT);
 - current item changed;
 - schedule projection changed;
 - message published/cleared;

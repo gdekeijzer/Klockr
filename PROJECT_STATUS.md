@@ -10,20 +10,21 @@ Repository, tooling and the timer domain/application kernel exist and pass all c
 
 - pnpm 12 + Turborepo monorepo: `apps/{web,server,worker}`, `packages/{domain,application,contracts,db,ui,config}`
 - strict TypeScript 6.0 everywhere; ESLint enforces domain/application framework independence
-- pure timer kernel (`packages/domain`): start/pause/resume/stop/end/adjust/configure, derived remaining/overtime, `Clock` + `ManualClock`, branded IDs, `Result`
+- pure timer kernel (`packages/domain`): timer states `idle | running | paused | stopped` with start (restart after stop)/pause/resume/stop/adjust/configure, derived remaining/overtime, `Clock` + `ManualClock`, branded IDs, `Result`
 - application command layer (`packages/application`): command envelope (`commandId`, `idempotencyKey`, `expectedRevision`), typed `AppError`, ports (`TimerRepository` with compare-and-set, `IdempotencyStore`, `Authorizer` with capability checks, `EventPublisher`), `executeTimerCommand`, in-memory adapters
 - Zod contracts (`packages/contracts`): timer command DTOs, timer snapshot with `serverTime` + `revision`, error and health responses
 - Drizzle + PostgreSQL (`packages/db`): client, migrator, one infrastructure-only migration `0000_bootstrap`
 - server: Fastify `/health` and `/health/ready`; worker: isolated job runner with empty job registry; web: Next.js placeholder page + `/healthz`
 - local PostgreSQL via `compose.dev.yaml` (host port 54329); CI workflow in `.github/workflows/ci.yml`
-- tests: 57 unit tests (domain 30, contracts 9, application 12, ui 1, server 3, worker 2) + 2 PostgreSQL integration tests
+- tests: 62 unit tests (domain 34, contracts 10, application 12, ui 1, server 3, worker 2) + 2 PostgreSQL integration tests
 - versions and commands: `docs/TECHNICAL_ARCHITECTURE.md` (Selected versions), `docs/DEVELOPMENT.md`
 
 ## Known gaps / notes after M0
 
-- Timer interpretations made in M0 are listed in `docs/TIMER_ENGINE.md` and raised as `OPEN_QUESTIONS.md` #31-33; none blocks M1.
-- CI workflow has not yet run on GitHub (no remote configured; the folder was initialised as a local git repository without commits).
-- The delivered bootstrap package was missing its dotfiles listed in `MANIFEST.md` (`.claude/commands/*`, `.github/PULL_REQUEST_TEMPLATE.md`, original `.env.example`/`.gitignore`/`.editorconfig`). M0 created new `.env.example`, `.gitignore` and `.editorconfig`; the `.claude/commands` and PR template are still absent.
+- M0 review (2026-11-09) applied: timer `ended` state and timer END command removed; END / NEXT becomes the Queue Item command `EndItem`, introduced with Queue Items. START after STOP = restart; adjustment crosses zero both ways. `OPEN_QUESTIONS.md` #31-33 resolved.
+- Repository on GitHub: `gdekeijzer/Klockr`, pushed directly to `main`. The first CI run on GitHub has not been verified from here.
+- Files missing from the delivered package (`.claude/commands/*`, `.github/PULL_REQUEST_TEMPLATE.md`) were recreated as thin pointers; `.env.example`, `.gitignore` and `.editorconfig` were written new in M0. `MANIFEST.md` lists M0 additions.
+- Prettier ignores Markdown/docs; documentation is only edited deliberately. (The initial M0 commit had already reformatted existing docs with Prettier; formatting only.)
 
 ## Completed decisions
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## M0 review — 2026-11-09
+
+- timer states reduced to `idle | running | paused | stopped`; removed `ended`, `endedAt`, `endTimer` and the `item.end` command/contract (END / NEXT is a Queue Item command, added with Queue Items);
+- START after STOP confirmed as restart from full duration; explicit tests that previous-run adjustments do not leak;
+- adjustment contract examples across zero (`02:00 +00:30`, `+00:10 -00:30`, `+02:14 +00:30`) as tests and in `TIMER_ENGINE.md`;
+- `OPEN_QUESTIONS.md` #31-33 resolved; `API_CONTRACT.md` and `REALTIME_OFFLINE.md` no longer list a timer END;
+- recreated `.claude/commands/*` and `.github/PULL_REQUEST_TEMPLATE.md`; `MANIFEST.md` lists M0 additions;
+- Prettier no longer formats Markdown/docs.
+
 ## M0 — 2026-11-09 — Repository bootstrap and domain/application kernel
 
 - pnpm/Turborepo monorepo with web/server/worker apps and domain/application/contracts/db/ui/config packages;

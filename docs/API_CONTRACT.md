@@ -48,9 +48,10 @@ Each mutation should support:
 - pause;
 - resume;
 - stop;
-- end;
 - adjust;
-- restart/reset where product UX allows it.
+- restart/reset where product UX allows it (START on a stopped timer is a restart).
+
+END is not a timer command; it is `END item / END+NEXT` under Queue Items above.
 
 ### Scheduling
 

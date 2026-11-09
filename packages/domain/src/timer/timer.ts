@@ -7,10 +7,14 @@ import type { DurationMs, EpochMs } from '../time';
  * Only transitions and timestamps are stored. The visible value is always derived with
  * {@link deriveTimer}; nothing in this model ticks. Overtime is a derived condition of a
  * running countdown, not a separate status (see docs/TIMER_ENGINE.md, ADR-0003).
+ *
+ * The timer has pure timer states only. Ending a Queue Item (END / NEXT) is a Queue Item /
+ * show-control concern that also exists for items without a timer; it is deliberately not
+ * modelled here and arrives with Queue Items. STOP is the only way to halt a timer.
  */
 export type TimerMode = 'countdown' | 'countup';
 
-export type TimerStatus = 'idle' | 'running' | 'paused' | 'stopped' | 'ended';
+export type TimerStatus = 'idle' | 'running' | 'paused' | 'stopped';
 
 export interface TimerState {
   readonly mode: TimerMode;
@@ -25,10 +29,9 @@ export interface TimerState {
   readonly startedAt: EpochMs | null;
   /** Set while paused. */
   readonly pausedAt: EpochMs | null;
-  /** Total paused time folded in at each RESUME/STOP/END. */
+  /** Total paused time folded in at each RESUME/STOP. */
   readonly pausedTotalMs: DurationMs;
   readonly stoppedAt: EpochMs | null;
-  readonly endedAt: EpochMs | null;
   /** Monotonic per-timer revision; increments on every accepted transition. */
   readonly revision: number;
 }
@@ -38,8 +41,7 @@ export interface TimerConfig {
   readonly durationMs: DurationMs;
 }
 
-export type TimerCommandName =
-  'configure' | 'start' | 'pause' | 'resume' | 'stop' | 'end' | 'adjust';
+export type TimerCommandName = 'configure' | 'start' | 'pause' | 'resume' | 'stop' | 'adjust';
 
 export type TimerError =
   | {
@@ -81,7 +83,6 @@ export function createTimer(config: TimerConfig): TimerResult {
     pausedAt: null,
     pausedTotalMs: 0,
     stoppedAt: null,
-    endedAt: null,
     revision: 0,
   });
 }
@@ -114,13 +115,14 @@ export function configureTimer(state: TimerState, config: TimerConfig): TimerRes
     pausedAt: null,
     pausedTotalMs: 0,
     stoppedAt: null,
-    endedAt: null,
   });
 }
 
 /**
  * START. From `idle` the run begins with any pre-start adjustment kept.
- * From `stopped` this is a RESTART: a fresh run from the full configured duration.
+ * From `stopped` this is functionally a RESTART: a fresh run from the full configured duration.
+ * Adjustments from the previous run never carry over (no configuration exists that keeps them).
+ * UIs should label this action RESTART while the timer is stopped.
  */
 export function startTimer(state: TimerState, now: EpochMs): TimerResult {
   if (state.status !== 'idle' && state.status !== 'stopped') return reject('start', state);
@@ -145,8 +147,8 @@ export function resumeTimer(state: TimerState, now: EpochMs): TimerResult {
 }
 
 /**
- * STOP halts the timer without finishing the item. It is never an alias for END.
- * A stopped timer can be restarted with START.
+ * STOP affects only this timer: it triggers no next-item behaviour and no end actions, and is
+ * never an alias for Queue Item END. A stopped timer can be restarted with START.
  */
 export function stopTimer(state: TimerState, now: EpochMs): TimerResult {
   if (state.status !== 'running' && state.status !== 'paused') return reject('stop', state);
@@ -155,20 +157,6 @@ export function stopTimer(state: TimerState, now: EpochMs): TimerResult {
     pausedAt: null,
     pausedTotalMs: foldPause(state, now),
     stoppedAt: now,
-  });
-}
-
-/**
- * END marks the timer as finished. Queue-level consequences (current/next, END+NEXT)
- * are orchestrated by the application layer, not here.
- */
-export function endTimer(state: TimerState, now: EpochMs): TimerResult {
-  if (state.status !== 'running' && state.status !== 'paused') return reject('end', state);
-  return next(state, {
-    status: 'ended',
-    pausedAt: null,
-    pausedTotalMs: foldPause(state, now),
-    endedAt: now,
   });
 }
 
@@ -263,9 +251,6 @@ function runningTimeMs(state: TimerState, at: EpochMs): DurationMs {
       break;
     case 'stopped':
       reference = state.stoppedAt ?? at;
-      break;
-    case 'ended':
-      reference = state.endedAt ?? at;
       break;
     case 'idle':
     case 'running':

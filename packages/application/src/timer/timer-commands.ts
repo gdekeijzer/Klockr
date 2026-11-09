@@ -1,7 +1,6 @@
 import type { TimerCommandDto, TimerSnapshot } from '@klockr/contracts';
 import {
   adjustTimer,
-  endTimer,
   ok,
   pauseTimer,
   QueueItemId,
@@ -31,19 +30,18 @@ export type AdjustTimerCommand = Command<
   'timer.adjust',
   TimerTarget & { readonly deltaMs: number }
 >;
-/**
- * END of a Queue Item. In M0 this ends the item's timer only. Queue-level current/next and
- * END+NEXT orchestration belong to M2. Deliberately a different command than STOP.
+/*
+ * No END command here: END / NEXT is a Queue Item / show-control command (it may end an item
+ * without a timer or with a stopped timer, run end actions and move current/next). It is added
+ * with Queue Items as `EndItem`. STOP only affects the timer.
  */
-export type EndItemCommand = Command<'item.end', TimerTarget>;
 
 export type TimerCommand =
   | StartTimerCommand
   | PauseTimerCommand
   | ResumeTimerCommand
   | StopTimerCommand
-  | AdjustTimerCommand
-  | EndItemCommand;
+  | AdjustTimerCommand;
 
 export interface TimerCommandOutcome {
   readonly queueItemId: QueueItemId;
@@ -76,8 +74,6 @@ function transitionFor(command: TimerCommand): Transition {
       const { deltaMs } = command.payload;
       return (state, now) => adjustTimer(state, deltaMs, now);
     }
-    case 'item.end':
-      return endTimer;
   }
 }
 
@@ -184,7 +180,6 @@ export function toTimerSnapshot(
     pausedAt: state.pausedAt,
     pausedTotalMs: state.pausedTotalMs,
     stoppedAt: state.stoppedAt,
-    endedAt: state.endedAt,
     revision: state.revision,
     serverTime,
   };

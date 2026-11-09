@@ -14,11 +14,10 @@ stateDiagram-v2
   Paused --> Running: RESUME
   Running --> Stopped: STOP
   Paused --> Stopped: STOP
-  Running --> Ended: END
-  Paused --> Ended: END
-  Stopped --> Running: START/RESTART if allowed
-  Ended --> [*]
+  Stopped --> Running: START (= RESTART from full duration)
 ```
+
+Timer states are exactly `idle`, `running`, `paused` and `stopped` (decision 2026-11-09, M0 review). There is no timer `Ended` state: END / NEXT ends a **Queue Item**, not a timer (see "STOP versus END" below).
 
 `Overtime` is a derived display/timing condition while a countdown is Running and the derived remaining value has crossed zero. It is not a separate persistent state.
 
@@ -74,13 +73,33 @@ Minimum operations:
 - START;
 - PAUSE;
 - RESUME;
-- STOP;
-- END;
-- NEXT/END+NEXT at queue/application level;
+- STOP (timer);
+- END / END+NEXT (Queue Item / show-control level, not a timer command);
 - adjust positive/negative time;
 - direct item/timer selection.
 
 `STOP` is never an alias for `END`.
+
+### STOP versus END (decision 2026-11-09)
+
+STOP:
+
+- affects only the timer;
+- triggers no next-item behaviour;
+- triggers no end actions.
+
+END / NEXT:
+
+- operationally ends the Queue Item;
+- may exist for an item without a timer;
+- may be executed when the item's timer is already stopped;
+- may later run end actions, change current/next and optionally start the next item.
+
+END is therefore a Queue Item / show-control command (`EndItem`), introduced together with the Queue Item lifecycle. It is not a transition of the timer state machine.
+
+### START after STOP (decision 2026-11-09)
+
+START on a stopped timer starts again from the full configured duration: functionally a RESTART. Adjustments from the previous run do not carry over. In stopped state the UI must present this action as RESTART.
 
 ## Adjustment behavior
 
@@ -89,6 +108,16 @@ Before zero, adding time increases the displayed remaining time.
 The current product decision for overtime is that adjustment operates on the displayed overtime value as selected during requirements. Example: a `+30` operation at `+02:14` produces `+02:44`.
 
 This is intentionally called out because it is non-obvious and should be validated again during UI prototyping. Do not silently reinterpret it as “grant 30 seconds back” without a product decision.
+
+Adjustment may cross the zero boundary in both directions (decision 2026-11-09). Contract examples:
+
+| Before | Adjustment | After |
+| --- | --- | --- |
+| `02:00` remaining | `+00:30` | `02:30` remaining |
+| `+00:10` overtime | `-00:30` | `00:20` remaining |
+| `+02:14` overtime | `+00:30` | `+02:44` overtime |
+
+Overtime remains derived state and is never persisted separately.
 
 ## Start modes
 
@@ -130,18 +159,17 @@ The engine must support multiple simultaneous timers. Only the relevant Queue cu
 ## Implementation (M0)
 
 Implemented in `packages/domain/src/timer/timer.ts` as pure functions over an immutable `TimerState`:
-`createTimer`, `configureTimer`, `startTimer`, `pauseTimer`, `resumeTimer`, `stopTimer`, `endTimer`, `adjustTimer`, `deriveTimer`.
+`createTimer`, `configureTimer`, `startTimer`, `pauseTimer`, `resumeTimer`, `stopTimer`, `adjustTimer`, `deriveTimer`.
 
-Stored fields: `mode`, `status` (`idle | running | paused | stopped | ended`), `durationMs`, `adjustmentMs`, `startedAt`, `pausedAt`, `pausedTotalMs`, `stoppedAt`, `endedAt`, `revision`. All instants are UTC epoch milliseconds supplied by an injected `Clock` (`systemClock` in production, `ManualClock` in tests).
+Stored fields: `mode`, `status` (`idle | running | paused | stopped`), `durationMs`, `adjustmentMs`, `startedAt`, `pausedAt`, `pausedTotalMs`, `stoppedAt`, `revision`. All instants are UTC epoch milliseconds supplied by an injected `Clock` (`systemClock` in production, `ManualClock` in tests).
 
-Interpretations made in M0 where the docs were not explicit (recorded in `OPEN_QUESTIONS.md` for validation):
+Implementation rules (the first two confirmed in the M0 review, see decisions above):
 
 - START from `stopped` is a RESTART: fresh run from the full configured duration; earlier adjustments are cleared. A pre-start adjustment made while `idle` is kept.
-- Overtime adjustment math is continuous: `-30` at `+00:10` gives `00:20` remaining.
-- Adjustments are allowed in `idle`, `running` and `paused`; not in `stopped` or `ended`.
+- Adjustment math is continuous across zero in both directions.
+- Adjustments are allowed in `idle`, `running` and `paused`; not in `stopped`.
 - Count-up adjustments never take elapsed time below zero.
 - `configure` is only allowed in `idle` or `stopped` and resets the timer to `idle`.
-- END is allowed from `running` and `paused` (per the state diagram), not from `idle` or `stopped`.
 - Durations are integer milliseconds, capped at 7 days.
 
 Display rounding (e.g. how 59.4 s is shown) is a presentation concern and is not decided in the domain.

@@ -72,3 +72,20 @@
 - `docs/prompts/M0_BOOTSTRAP.md`
 - `docs/reviews/2026-10-03-functional-review.md`
 - `docs/source/Functioneel_Ontwerp_StageTimer_Show_Control_v0.2.rtf`
+
+## Added in M0 (implementation)
+
+- `.claude/commands/*` and `.github/PULL_REQUEST_TEMPLATE.md` were missing from the delivered package and were recreated in the M0 review as thin pointers to `CLAUDE.md`, `ROADMAP.md` and `CONTRIBUTING.md`.
+- `.github/workflows/ci.yml`
+- `.nvmrc`
+- `.prettierignore`
+- `.prettierrc.json`
+- `compose.dev.yaml`
+- `docs/DEVELOPMENT.md`
+- `eslint.config.js`
+- `package.json`
+- `pnpm-lock.yaml`
+- `pnpm-workspace.yaml`
+- `scripts/compose.mjs`
+- `turbo.json`
+- `apps/` (`web`, `server`, `worker`) and `packages/` (`domain`, `application`, `contracts`, `db`, `ui`, `config`) — see `docs/DEVELOPMENT.md`

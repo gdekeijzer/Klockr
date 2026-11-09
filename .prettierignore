@@ -1,4 +1,7 @@
 pnpm-lock.yaml
-docs/source/
-docs/design/assets/
 packages/db/migrations/meta/
+
+# Product, architecture and process documentation is edited deliberately, never by bulk formatting.
+# Prettier formats source and config only.
+*.md
+docs/

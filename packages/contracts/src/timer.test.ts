@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { timerCommandSchema, timerSnapshotSchema } from './timer';
+import { timerCommandSchema, timerSnapshotSchema, timerStatusSchema } from './timer';
 
 const commandId = '0b9f8a6e-4d3a-4a52-9f0b-1a2b3c4d5e6f';
 const queueItemId = '7c1e2d3f-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
@@ -35,14 +35,16 @@ describe('timer command contracts', () => {
     expect(timerCommandSchema.safeParse(input).success).toBe(false);
   });
 
-  it('keeps STOP and END as distinct command types', () => {
-    const stop = timerCommandSchema.parse({
-      commandId,
-      type: 'timer.stop',
-      payload: { queueItemId },
-    });
-    const end = timerCommandSchema.parse({ commandId, type: 'item.end', payload: { queueItemId } });
-    expect(stop.type).not.toBe(end.type);
+  it('has no timer END command: END belongs to the Queue Item', () => {
+    for (const type of ['timer.end', 'item.end']) {
+      expect(
+        timerCommandSchema.safeParse({ commandId, type, payload: { queueItemId } }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('rejects the removed ended status in snapshots', () => {
+    expect(timerStatusSchema.safeParse('ended').success).toBe(false);
   });
 });
 
@@ -58,7 +60,6 @@ describe('timer snapshot contract', () => {
       pausedAt: null,
       pausedTotalMs: 0,
       stoppedAt: null,
-      endedAt: null,
       revision: 1,
     };
     expect(timerSnapshotSchema.safeParse(base).success).toBe(false);

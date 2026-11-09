@@ -89,12 +89,16 @@ describe('executeTimerCommand', () => {
     ]);
   });
 
-  it('END is a distinct command from STOP', async () => {
+  it('STOP only stops the timer; START afterwards is a restart from the full duration', async () => {
     await executeTimerCommand(cmd('timer.start'), ctx, deps);
-    const ended = await executeTimerCommand(cmd('item.end'), ctx, deps);
-    expect(ended.ok && ended.value.state.status).toBe('ended');
-    const restart = await executeTimerCommand(cmd('timer.start'), ctx, deps);
-    expect(!restart.ok && restart.error.code).toBe('invalid_transition');
+    clock.advance(MINUTE_MS);
+    const stopped = await executeTimerCommand(cmd('timer.stop'), ctx, deps);
+    expect(stopped.ok && stopped.value.state.status).toBe('stopped');
+    expect(events.events.at(-1)?.commandType).toBe('timer.stop');
+
+    const restarted = await executeTimerCommand(cmd('timer.start'), ctx, deps);
+    if (!restarted.ok) throw new Error('restart failed');
+    expect(deriveTimer(restarted.value.state, clock.now()).remainingMs).toBe(10 * MINUTE_MS);
   });
 
   it('a duplicate START with the same idempotency key is applied once', async () => {
