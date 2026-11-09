@@ -18,7 +18,7 @@ import type { Server as HttpServer } from 'node:http';
 import { Server, type Socket } from 'socket.io';
 import { ownerTokenFromCookies } from '../http/auth';
 import { FixedWindowLimiter } from '../infra/rate-limiter';
-import { showRoom, type RealtimeHub } from './hub';
+import { boardRoom, boardsRoom, operatorRoom, type RealtimeHub } from './hub';
 
 type Subscription =
   | { readonly role: 'operator'; readonly showId: ShowId; readonly actor: Actor }
@@ -49,7 +49,7 @@ type KlockrSocket = Socket<
 /**
  * Socket.IO is a read channel: Operators (owner cookie) and Boards (board token) subscribe to one
  * Show room. Every connect and reconnect sends a fresh authoritative snapshot; afterwards only
- * transition snapshots arrive. Mutations go through HTTP commands.
+ * transition snapshots and Queue/Board projections arrive. Mutations go through HTTP commands.
  */
 export interface RealtimeLogger {
   info(obj: object, msg: string): void;
@@ -132,12 +132,13 @@ export function attachRealtime(
 
     void (async () => {
       // Join first, then snapshot: a transition between the two is delivered as a newer revision.
-      await socket.join(showRoom(sub.showId));
       if (sub.role === 'operator') {
+        await socket.join(operatorRoom(sub.showId));
         const state = await getShowState(sub.showId, { actor: sub.actor }, services);
         if (state.ok) socket.emit(realtimeEvents.showSnapshot, state.value);
         else socket.disconnect(true);
       } else {
+        await socket.join([boardsRoom(sub.showId), boardRoom(sub.boardId)]);
         const state = await getBoardState(sub.boardId, { actor: sub.actor }, services);
         if (state.ok) socket.emit(realtimeEvents.boardSnapshot, state.value);
         else socket.disconnect(true);
@@ -145,6 +146,6 @@ export function attachRealtime(
     })();
   });
 
-  hub.attach(io);
+  hub.attach(io, { boardOfShow: (showId) => services.shows.getBoardOfShow(showId) });
   return io;
 }

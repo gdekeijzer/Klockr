@@ -33,8 +33,9 @@ describe('server + PostgreSQL (requires PostgreSQL)', () => {
     const state = (await (
       await fetch(`${first.baseUrl}/api/v1/shows/${showId}/state`, { headers: { cookie } })
     ).json()) as {
-      item: { id: string };
+      queue: { items: { id: string }[] };
     };
+    const itemId = state.queue.items[0]?.id ?? '';
 
     const start = await fetch(`${first.baseUrl}/api/v1/shows/${showId}/commands`, {
       method: 'POST',
@@ -42,7 +43,7 @@ describe('server + PostgreSQL (requires PostgreSQL)', () => {
       body: JSON.stringify({
         commandId: crypto.randomUUID(),
         type: 'timer.start',
-        payload: { queueItemId: state.item.id },
+        payload: { queueItemId: itemId },
       }),
     });
     expect(start.status).toBe(200);
@@ -55,7 +56,9 @@ describe('server + PostgreSQL (requires PostgreSQL)', () => {
         headers: { cookie },
       });
       expect(reloaded.status).toBe(200);
-      expect(await reloaded.json()).toMatchObject({ timer: { status: 'running', revision: 1 } });
+      expect(await reloaded.json()).toMatchObject({
+        queue: { currentItemId: itemId, items: [{ timer: { status: 'running', revision: 1 } }] },
+      });
 
       const board = await fetch(`${second.baseUrl}/api/v1/board/state`, {
         headers: { authorization: `Bearer ${boardShareToken}` },
@@ -64,7 +67,7 @@ describe('server + PostgreSQL (requires PostgreSQL)', () => {
       expect(await board.json()).toMatchObject({ timer: { status: 'running', revision: 1 } });
 
       const socket = second.connect({ role: 'board', boardShareToken });
-      expect((await nextEvent(socket, 'board.snapshot')).timer.revision).toBe(1);
+      expect((await nextEvent(socket, 'board.snapshot')).timer?.revision).toBe(1);
 
       const mutate = await fetch(`${second.baseUrl}/api/v1/shows/${showId}/commands`, {
         method: 'POST',
@@ -72,7 +75,7 @@ describe('server + PostgreSQL (requires PostgreSQL)', () => {
         body: JSON.stringify({
           commandId: crypto.randomUUID(),
           type: 'timer.stop',
-          payload: { queueItemId: state.item.id },
+          payload: { queueItemId: itemId },
         }),
       });
       expect(mutate.status).toBe(401);

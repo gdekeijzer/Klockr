@@ -10,8 +10,6 @@ import {
   type AccessGrant,
   type Clock,
   type GrantKind,
-  type QueueItem,
-  type TimerState,
 } from '@klockr/domain';
 import type { CommandContext } from '../command';
 import { appError, type CommandResult } from '../errors';
@@ -23,15 +21,15 @@ import type {
   ShowRepository,
   TokenService,
 } from '../ports';
+import { toBoardSnapshot, toQueueSnapshot, type QueueCommandDeps } from '../queue';
 import {
   executeTimerCommand,
-  toTimerSnapshot,
   type TimerCommand,
   type TimerCommandDeps,
   type TimerCommandOutcome,
 } from '../timer';
 
-export interface ShowServiceDeps extends TimerCommandDeps {
+export interface ShowServiceDeps extends TimerCommandDeps, QueueCommandDeps {
   readonly shows: ShowRepository;
   readonly grants: GrantRepository;
   readonly tokens: TokenService;
@@ -113,26 +111,21 @@ export async function createBoardShare(
   return ok({ boardId: board.id, boardShareToken: share.token });
 }
 
-function timerOf(item: QueueItem): TimerState | null {
-  return item.timer;
-}
-
-/** Management projection of the Show State (Operator). */
+/** Management projection of the Show State (Operator / Queue Editor). */
 export async function getShowState(
   showId: ShowId,
   context: CommandContext,
   deps: ShowServiceDeps,
 ): Promise<CommandResult<ShowStateSnapshot>> {
-  if (!(await deps.authorizer.can(context.actor, 'show.read', { kind: 'show', id: showId }))) {
+  if (!(await deps.authorizer.can(context.actor, 'queue.read', { kind: 'show', id: showId }))) {
     return appError('forbidden', 'Not permitted to read this Show');
   }
-  const [show, item, board] = await Promise.all([
+  const [show, board] = await Promise.all([
     deps.shows.getShow(showId),
-    deps.shows.getPrimaryItem(showId),
     deps.shows.getBoardOfShow(showId),
   ]);
-  const timer = item ? timerOf(item) : null;
-  if (!show || !item || !board || !timer) return appError('not_found', 'Show not found');
+  const queue = show ? await deps.queues.loadQueue(show.primaryQueueId) : null;
+  if (!show || !board || !queue) return appError('not_found', 'Show not found');
   return ok({
     show: {
       id: show.id,
@@ -141,13 +134,12 @@ export async function getShowState(
       createdAt: show.createdAt,
       expiresAt: show.expiresAt,
     },
-    item: { id: item.id, title: item.title },
     board: { id: board.id },
-    timer: toTimerSnapshot(item.id, timer, deps.clock.now()),
+    queue: toQueueSnapshot(queue, deps.clock.now()),
   });
 }
 
-/** Read-only Board projection for a Board share grant. */
+/** Read-only Board projection for a Board share grant: follows the Program Queue's current. */
 export async function getBoardState(
   boardId: BoardId,
   context: CommandContext,
@@ -157,14 +149,10 @@ export async function getBoardState(
     return appError('forbidden', 'Not permitted to read this Board');
   }
   const board = await deps.shows.getBoard(boardId);
-  const item = board ? await deps.shows.getPrimaryItem(board.showId) : null;
-  const timer = item ? timerOf(item) : null;
-  if (!board || !item || !timer) return appError('not_found', 'Board not found');
-  return ok({
-    board: { id: board.id, preset: board.preset },
-    item: { title: item.title },
-    timer: toTimerSnapshot(item.id, timer, deps.clock.now()),
-  });
+  const show = board ? await deps.shows.getShow(board.showId) : null;
+  const queue = show ? await deps.queues.loadQueue(show.primaryQueueId) : null;
+  if (!board || !queue) return appError('not_found', 'Board not found');
+  return ok(toBoardSnapshot(board, queue, deps.clock.now()));
 }
 
 /**

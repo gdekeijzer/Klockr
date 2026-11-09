@@ -2,7 +2,32 @@
 
 ## Phase
 
-**M1 complete (2026-11-09) — Anonymous Quick Timer vertical slice. Awaiting review before M2.**
+**M2 complete (2026-11-09) — Queue operations. Awaiting review before M3.** (Branch `feature/m2-queue-operations`.)
+
+## M2 delivered
+
+- Program Queue as a real rundown: multiple universal Queue Items (title, subtitle, notes, tags, optional timer, active/inactive, start mode, warning override, completed lifecycle, created/updated, revision) and one-level Groups (Group -> Queue Items). No Session/Cue/Timer hierarchy; Speaker/Note/Break/Timer are UI presets of the same item
+- Queue commands through `packages/application` (`executeQueueCommand`): add, edit, delete, duplicate, move/reorder (also into/out of Groups), active/inactive, set current, END, END + NEXT, Group add/rename/delete/duplicate/move, warning overrides on Show/Queue/Item
+- Current persisted per Queue, Next derived (first active, not completed item after Current); inactive items skipped
+- STOP vs END kept separate: STOP only stops the timer; END completes the item (stopping a live timer as part of END, no `ended` timer state); END + NEXT moves Current and starts the next timer only with start mode "On previous END"
+- warning thresholds: percent or absolute; inheritance Show default -> Queue override -> Queue Item override with visible source and Reset to inherited
+- Operator View: large Current (title, subtitle, timer, state, thresholds + source, notes), Timer transport, ±10/±30 s, separate END and END + NEXT, Next card (duration, notes, AUTO-START), compact Queue preview with Go to / stop controls for other running timers
+- Queue Editor (`/show/<id>/edit`): presets, inspector (title, subtitle, duration, start mode, notes, tags, group, active, warning override), duplicate, two-step delete, drag & drop reorder plus ↑/↓, Groups with collapse, Show/Queue warning settings
+- Speaker Board follows Current automatically; items without timer show their title only; notes never reach Boards
+- persistence: migration `0002_queue_operations`; atomic aggregate save (Queue revision + per-timer compare-and-set); restart/reload keeps order, Groups, current, completed, active, timers and overrides (tested)
+- realtime: `queue.state` to operators and fresh `board.snapshot` per Queue change, timer transitions unchanged; client gating by Queue revision and timer revision
+- capabilities `queue.read`, `queue.manage`, `item.control`, `show.manage`; board token can never mutate
+- tests: 231 unit/component tests (domain 96, contracts 19, application 43, ui 16, server 23, worker 2, web 32), 12 PostgreSQL integration tests, 6 Playwright E2E (M1's 4 unchanged + rundown flow + Group/inheritance flow)
+
+## Known limitations after M2
+
+- No schedule fields, planned/projected/actual times, ahead/behind or Scheduled start (M3). Only the "On previous END" start mode exists.
+- Notes are operator-only by rule; per-audience visibility (e.g. "Speaker Board hidden") comes with Boards/Audiences (M4). A current item without timer shows its title on the Speaker Board (see OPEN_QUESTIONS #35).
+- Tags are stored and editable as text but not used for filtering yet.
+- Group collapse state is per browser and not shared.
+- No locks yet: structural edits during a live show are guarded only by the safety rules (current/running items cannot be deleted) and revisions (M3).
+- Keyboard shortcuts for live control are not defined yet.
+- Single Program Queue only; no parallel discipline Queues or relations (M4/M5).
 
 ## M1 delivered
 
@@ -17,8 +42,7 @@
 
 ## Known limitations after M1
 
-- Warning/critical thresholds use the KLOCKR defaults (20 % / 5 % of configured duration); they are not yet configurable (inheritance arrives in M2).
-- No END/NEXT, Queue editing, multiple items, Current/Next (M2).
+- (Resolved in M2: thresholds configurable with inheritance; END/NEXT, Queue editing, multiple items, Current/Next.)
 - Board links cannot be revoked from the UI yet; no PIN/expiry; no anonymous cleanup job; no "Claim Show".
 - The owner credential is bound to one browser; clearing cookies loses control of the Show (by design until accounts/claim in M6).
 - Rate limits and realtime state are in-process (single instance, as accepted for V1).
@@ -100,9 +124,9 @@
 
 ## Next milestone
 
-**M2 — Queue operations** (see `ROADMAP.md`). Review M1 before starting.
+**M3 — Scheduling + Master** (see `ROADMAP.md`). Review M2 (and `OPEN_QUESTIONS.md` #34-37) before starting.
 
-## Decisions that do not block M2
+## Decisions that do not block M3
 
 - concrete magic-link/auth library;
 - transactional email provider;

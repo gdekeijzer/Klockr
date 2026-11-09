@@ -1,23 +1,21 @@
 'use client';
 
-import type { BoardStateSnapshot } from '@klockr/contracts';
 import { deriveTimer, timerPhase } from '@klockr/domain';
 import { colorVar, formatTimer, remainingFraction, timerDigitColor } from '@klockr/ui';
 import { useEffect, useState } from 'react';
 import { ProgressBar } from '../../../components/ProgressBar';
-import { useRealtime } from '../../../lib/use-realtime';
+import { useBoardRealtime } from '../../../lib/use-realtime';
 import { useServerNow } from '../../../lib/use-server-now';
 import styles from './board.module.css';
 
 /**
- * Read-only Speaker/Confidence Board. Renders the last authoritative timer locally; a brief
- * disconnect never blanks or replaces the display — only a subtle RECONNECTING marker appears.
+ * Read-only Speaker/Confidence Board. Follows the Program Queue's current item: its title and,
+ * when it has one, its timer (rendered locally from the last authoritative state). Never shows
+ * operator notes. A brief disconnect never blanks or replaces the display — only a subtle
+ * RECONNECTING marker appears.
  */
 export function SpeakerBoard({ token }: { token: string }) {
-  const rt = useRealtime<BoardStateSnapshot>(
-    { role: 'board', boardShareToken: token },
-    'board.snapshot',
-  );
+  const rt = useBoardRealtime(token);
   const now = useServerNow(rt.offsetMs);
   useWakeLock();
   const controlsVisible = usePointerActivity();
@@ -31,7 +29,7 @@ export function SpeakerBoard({ token }: { token: string }) {
   }
 
   // Only before the very first snapshot; never after the board has been synchronized.
-  if (!rt.timer) {
+  if (!rt.board) {
     return (
       <main className={styles.board} aria-busy>
         <p className={styles.message}>Connecting…</p>
@@ -39,11 +37,12 @@ export function SpeakerBoard({ token }: { token: string }) {
     );
   }
 
-  const view = deriveTimer(rt.timer, now);
-  const phase = timerPhase(view);
-  const target = rt.timer.durationMs + rt.timer.adjustmentMs;
+  const current = rt.board.current;
+  const timer = rt.timer;
+  const view = timer ? deriveTimer(timer, now) : null;
+  const phase = view ? timerPhase(view, rt.board.warning) : 'normal';
   const label =
-    rt.timer.status === 'paused' ? 'PAUSED' : rt.timer.status === 'stopped' ? 'STOPPED' : null;
+    timer?.status === 'paused' ? 'PAUSED' : timer?.status === 'stopped' ? 'STOPPED' : null;
 
   return (
     <main className={styles.board} data-phase={phase} data-connection={rt.status}>
@@ -56,28 +55,44 @@ export function SpeakerBoard({ token }: { token: string }) {
         )}
       </div>
 
-      <div
-        className={`${styles.digits} mono`}
-        style={{ color: timerDigitColor(phase) }}
-        data-testid="board-timer"
-        data-status={rt.timer.status}
-        data-revision={rt.timer.revision}
-      >
-        {formatTimer(view)}
-      </div>
-      <div className={styles.state}>
-        {label && <span data-testid="board-state-label">{label}</span>}
-        {phase === 'overtime' && (
-          <span style={{ color: colorVar('state-critical') }}>OVERTIME</span>
+      <div className={styles.title} data-testid="board-title" data-has-timer={timer !== null}>
+        {current ? (
+          <>
+            <span className={styles.titleMain}>{current.title}</span>
+            {current.subtitle && <span className={styles.titleSub}>{current.subtitle}</span>}
+          </>
+        ) : (
+          <span className={styles.titleSub}>—</span>
         )}
       </div>
 
-      <div className={styles.progress}>
-        <ProgressBar
-          fraction={remainingFraction(view, target)}
-          color={phase === 'normal' ? colorVar('text-secondary') : timerDigitColor(phase)}
-        />
-      </div>
+      {timer && view ? (
+        <>
+          <div
+            className={`${styles.digits} mono`}
+            style={{ color: timerDigitColor(phase) }}
+            data-testid="board-timer"
+            data-status={timer.status}
+            data-revision={timer.revision}
+          >
+            {formatTimer(view)}
+          </div>
+          <div className={styles.state}>
+            {label && <span data-testid="board-state-label">{label}</span>}
+            {phase === 'overtime' && (
+              <span style={{ color: colorVar('state-critical') }}>OVERTIME</span>
+            )}
+          </div>
+          <div className={styles.progress}>
+            <ProgressBar
+              fraction={remainingFraction(view, timer.durationMs + timer.adjustmentMs)}
+              color={phase === 'normal' ? colorVar('text-secondary') : timerDigitColor(phase)}
+            />
+          </div>
+        </>
+      ) : (
+        <div className={styles.noTimer} data-testid="board-no-timer" />
+      )}
 
       <button
         type="button"

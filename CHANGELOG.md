@@ -1,5 +1,16 @@
 # Changelog
 
+## M2 — 2026-11-09 — Queue operations
+
+- domain: Queue aggregate with one-level Groups, universal Queue Item (subtitle, notes, tags, active, completedAt, startMode, warning override, created/updated, revision), dense ordering (`layoutOf`/`orderedItems`), derived `nextItem` and lifecycle, pure operations incl. `endItem` (END / END + NEXT, stops a live timer as part of END, starts the next timer only with start mode `on_previous_end`), percent **and** absolute thresholds with `resolveItemThresholds` (Show -> Queue -> Item); capabilities `queue.read`, `queue.manage`, `item.control`, `show.manage`;
+- application: `executeQueueCommand` (permission per command, idempotency, expected Queue revision, automatic re-evaluation of lost races, `queue.changed` events), `QueueRepository` port with atomic `saveQueue`, Queue/Board projections;
+- contracts: Queue command DTOs, Queue/Board snapshots, `showCommandSchema` for the shared commands endpoint, `queue.state` realtime event;
+- db: migration `0002_queue_operations` (queue_groups; Queue/Item/Show columns; data migration for M1 Shows) and transactional diff-based `saveQueue`;
+- server: Queue commands on `/api/v1/shows/:showId/commands`, per-audience realtime rooms, Board projection pushed on every Queue change;
+- web: Operator View rebuilt around Current / Next / Queue preview with separate END and END + NEXT, Queue Editor (`/show/<id>/edit`) with presets, inspector, drag & drop, Groups and inherited warning settings, Speaker Board follows Current;
+- tests: 231 unit/component, 12 PostgreSQL integration (incl. atomic END + NEXT and restart reload), 6 Playwright E2E;
+- docs: Queue implementation notes, END-with-live-timer decision, threshold inheritance, API/realtime/security/data-model M2 sections, OPEN_QUESTIONS #34-37.
+
 ## M1 — 2026-11-09 — Anonymous Quick Timer vertical slice
 
 - domain: `createQuickTimerShow` (anonymous Show, Program Queue, timed Queue Item, Speaker Board, 7-day expiry), access grants with capability bundles and scope (`grantPermits`), derived `timerPhase` with percentage-based KLOCKR defaults (warning <= 20 %, critical <= 5 % of configured duration; OPEN_QUESTIONS #5 resolved);

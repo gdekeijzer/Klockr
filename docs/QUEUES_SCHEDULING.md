@@ -95,3 +95,17 @@ Recommended model:
 - `next` is the next eligible Queue Item;
 - global Show current/next derives from the primary Program Queue;
 - Boards can explicitly select another Queue.
+
+## Implementation (M2)
+
+**Structure.** `Queue -> (optional) Group -> Queue Item`, one Group level only (no Group-in-Group, no Session/Cue/Timer hierarchy). The Queue's top level interleaves items and Groups; each Group orders its own children. Positions are dense integers per container and are rewritten by every structural command. Code: `packages/domain/src/queue/`.
+
+**Current.** One persisted `currentItemId` per Queue (nullable). It changes only through explicit commands: `queue.setCurrent` (operator jump/re-run) and `item.end` with `next: true`. Changing current never starts, stops or otherwise touches any timer (a timer still running on the previous item keeps running and is shown as RUNNING in the Queue preview with its own stop control).
+
+**Next is derived, never stored** (decision 2026-11-09). `next` = the first *eligible* item after Current in Queue order (groups expanded in place); eligible = `active` and not completed. Without a Current, `next` = the first eligible item of the Queue. Because it is a pure function of order, active flags, completion and the current position (`nextItem()`), it can never disagree with them; the server includes the derived `nextItemId` in every Queue snapshot so all clients show the same value. Consequence: after jumping back to re-run an earlier item, NEXT continues with the first not-yet-completed item after it.
+
+**Lifecycle (derived).** `current` > `completed` > `inactive` > `upcoming`, from `currentItemId`, `completedAt` and `active`. Making a completed item current again clears its `completedAt` (it is live again).
+
+**Safety rules.** The current item cannot be deleted or made inactive; an item or Group with a running/paused timer cannot be deleted; an inactive item cannot be made current (activate it first). Drag & drop only moves structure; it never changes current/next state or timers by itself (next is simply re-derived).
+
+**Consistency boundary.** The Queue aggregate (Queue, Groups, Items, item timers and the Show warning default it inherits) is saved atomically with compare-and-set on `queues.revision` plus per-timer compare-and-set for every timer the command changes. END + NEXT (complete + stop current timer + move current + optional start of the next timer) is therefore all-or-nothing.

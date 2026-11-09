@@ -39,6 +39,7 @@ function services(clock: ManualClock): ShowServiceDeps {
     clock,
     shows: store,
     timers: store,
+    queues: store,
     grants: store,
     locator: store,
     tokens: new FakeTokenService(randomUUID().slice(0, 8)),
@@ -68,7 +69,7 @@ describe('PostgreSQL Show persistence (requires PostgreSQL)', () => {
 
     const state = await getShowState(ShowId(created.value.showId), ctx, deps);
     if (!state.ok) throw new Error('state failed');
-    const itemId = state.value.item.id;
+    const itemId = state.value.queue.items[0]?.id ?? '';
 
     const started = await runShowTimerCommand(
       ShowId(created.value.showId),
@@ -103,7 +104,7 @@ describe('PostgreSQL Show persistence (requires PostgreSQL)', () => {
       { actor: board.actor },
       reloaded,
     );
-    expect(boardState.ok && boardState.value.timer.status).toBe('running');
+    expect(boardState.ok && boardState.value.timer?.status).toBe('running');
     const attempt = await runShowTimerCommand(
       ShowId(created.value.showId),
       { commandId: randomUUID(), type: 'timer.stop', payload: { queueItemId: itemId } },
@@ -119,7 +120,9 @@ describe('PostgreSQL Show persistence (requires PostgreSQL)', () => {
     const deps = services(clock);
     const created = await createQuickTimer({ durationMs: MINUTE_MS }, deps);
     if (!created.ok) throw new Error('create failed');
-    const item = await deps.shows.getPrimaryItem(ShowId(created.value.showId));
+    const show = await deps.shows.getShow(ShowId(created.value.showId));
+    const queue = show ? await deps.queues.loadQueue(show.primaryQueueId) : null;
+    const item = queue?.items[0];
     if (!item?.timer) throw new Error('missing');
     const next = { ...item.timer, status: 'running' as const, startedAt: clock.now(), revision: 1 };
     expect((await deps.timers.save(item.id, next, 0)).ok).toBe(true);

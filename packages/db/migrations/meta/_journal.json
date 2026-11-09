@@ -15,6 +15,13 @@
       "when": 1794220865441,
       "tag": "0001_quick_timer",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794231427675,
+      "tag": "0002_queue_operations",
+      "breakpoints": true
     }
   ]
 }

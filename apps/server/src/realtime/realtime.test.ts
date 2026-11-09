@@ -19,8 +19,8 @@ async function createShow(s: Server) {
   const cookie = cookieFrom(res.headers.getSetCookie());
   const state = (await (
     await fetch(`${s.baseUrl}/api/v1/shows/${body.showId}/state`, { headers: { cookie } })
-  ).json()) as { item: { id: string } };
-  return { ...body, cookie, itemId: state.item.id };
+  ).json()) as { queue: { items: { id: string }[] } };
+  return { ...body, cookie, itemId: state.queue.items[0]?.id ?? '' };
 }
 
 async function send(
@@ -116,6 +116,7 @@ describe('realtime', () => {
     await send(server, show, 'timer.start');
     const board = server.connect({ role: 'board', boardShareToken: show.boardShareToken });
     const { timer } = await nextEvent(board, 'board.snapshot');
+    if (!timer) throw new Error('board snapshot without timer');
     const state: TimerState = { ...timer };
     const at = timer.serverTime + 90_000;
     expect(deriveTimer(state, at).remainingMs).toBe(10 * MINUTE_MS - (at - (timer.startedAt ?? 0)));

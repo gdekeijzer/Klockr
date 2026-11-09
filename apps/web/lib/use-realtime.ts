@@ -6,6 +6,7 @@ import {
   type BoardStateSnapshot,
   type ClockAck,
   type ClientToServerEvents,
+  type QueueSnapshot,
   type RealtimeAuth,
   type ServerToClientEvents,
   type ShowStateSnapshot,
@@ -13,7 +14,17 @@ import {
 } from '@klockr/contracts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { acceptTimer, ClockOffsetEstimator } from './timer-sync';
+import {
+  applyBoardSnapshot,
+  applyBoardTimer,
+  applyQueueSnapshot,
+  applyTimerUpdate,
+  emptyBoardState,
+  emptyManagementState,
+  type BoardState,
+  type ManagementState,
+} from './live-state';
+import { ClockOffsetEstimator } from './timer-sync';
 
 /**
  * `connected` means: socket open AND a fresh authoritative snapshot received after (re)connect.
@@ -26,39 +37,34 @@ const CLOCK_PING_INTERVAL_MS = 15_000;
 
 type KlockrClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
-export interface RealtimeState<TSnapshot> {
+interface Connection {
   readonly status: ConnectionStatus;
-  readonly snapshot: TSnapshot | null;
-  readonly timer: TimerSnapshot | null;
   /** serverTime - localTime, for rendering in server time. */
   readonly offsetMs: number;
   /** Set when the credential is rejected; reconnecting will not help. */
   readonly denied: boolean;
-  /** Feed an authoritative timer received via HTTP (command response); revision-gated. */
-  readonly applyTimer: (timer: TimerSnapshot) => void;
 }
 
-export function useRealtime<TSnapshot extends ShowStateSnapshot | BoardStateSnapshot>(
+/**
+ * One read-only Socket.IO subscription with reconnect, offline detection and clock-offset
+ * estimation. `register` attaches the event handlers; `onSnapshot` must be called by the
+ * snapshot handler (it marks the connection live and seeds the clock offset).
+ */
+function useSocket(
   auth: RealtimeAuth,
-  snapshotEvent: 'show.snapshot' | 'board.snapshot',
-): RealtimeState<TSnapshot> {
+  register: (socket: KlockrClientSocket, onSnapshot: (serverTime: number) => void) => void,
+): Connection {
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
-  const [snapshot, setSnapshot] = useState<TSnapshot | null>(null);
-  const [timer, setTimer] = useState<TimerSnapshot | null>(null);
   const [offsetMs, setOffsetMs] = useState(0);
   const [denied, setDenied] = useState(false);
   const estimator = useRef(new ClockOffsetEstimator());
+  const registerRef = useRef(register);
   const authKey = JSON.stringify(auth);
 
-  const applyTimer = useCallback((incoming: TimerSnapshot) => {
-    setTimer((current) => acceptTimer(current, incoming));
-  }, []);
-
   useEffect(() => {
-    const parsedAuth = JSON.parse(authKey) as RealtimeAuth;
     const socket: KlockrClientSocket = io({
       path: REALTIME_PATH,
-      auth: parsedAuth,
+      auth: JSON.parse(authKey) as RealtimeAuth,
       transports: ['websocket', 'polling'],
       reconnectionDelay: 500,
       reconnectionDelayMax: 3_000,
@@ -79,19 +85,13 @@ export function useRealtime<TSnapshot extends ShowStateSnapshot | BoardStateSnap
         });
     };
 
-    const onSnapshot = (s: ShowStateSnapshot | BoardStateSnapshot) => {
+    registerRef.current(socket, (serverTime) => {
       clearTimeout(offlineTimer);
-      setOffsetMs(estimator.current.seedFromServerTime(s.timer.serverTime, Date.now()));
-      setSnapshot(s as TSnapshot);
-      setTimer((current) => acceptTimer(current, s.timer));
+      setOffsetMs(estimator.current.seedFromServerTime(serverTime, Date.now()));
       setStatus('connected');
       ping();
-    };
-
-    socket.on(snapshotEvent, onSnapshot);
-    socket.on(realtimeEvents.timer, (t) => {
-      setTimer((current) => acceptTimer(current, t));
     });
+
     socket.on('disconnect', (reason) => {
       setStatus('reconnecting');
       clearTimeout(offlineTimer);
@@ -117,7 +117,71 @@ export function useRealtime<TSnapshot extends ShowStateSnapshot | BoardStateSnap
       clearTimeout(offlineTimer);
       socket.disconnect();
     };
-  }, [authKey, snapshotEvent]);
+  }, [authKey]);
 
-  return { status, snapshot, timer, offsetMs, denied, applyTimer };
+  return { status, offsetMs, denied };
+}
+
+export interface ShowRealtime extends Connection, ManagementState {
+  readonly show: ShowStateSnapshot['show'] | null;
+  readonly boardId: string | null;
+  /** Feed an authoritative Queue received via HTTP (command response); revision-gated. */
+  readonly applyQueue: (queue: QueueSnapshot) => void;
+  /** Feed an authoritative timer received via HTTP (command response); revision-gated. */
+  readonly applyTimer: (timer: TimerSnapshot) => void;
+}
+
+/** Operator View / Queue Editor subscription (owner cookie). */
+export function useShowRealtime(showId: string): ShowRealtime {
+  const [meta, setMeta] = useState<{ show: ShowStateSnapshot['show']; boardId: string } | null>(
+    null,
+  );
+  const [state, setState] = useState<ManagementState>(emptyManagementState);
+
+  const connection = useSocket({ role: 'operator', showId }, (socket, onSnapshot) => {
+    socket.on(realtimeEvents.showSnapshot, (s) => {
+      setMeta({ show: s.show, boardId: s.board.id });
+      setState((current) => applyQueueSnapshot(current, s.queue));
+      onSnapshot(s.queue.serverTime);
+    });
+    socket.on(realtimeEvents.queue, (q) => {
+      setState((current) => applyQueueSnapshot(current, q));
+    });
+    socket.on(realtimeEvents.timer, (t) => {
+      setState((current) => applyTimerUpdate(current, t));
+    });
+  });
+
+  const applyQueue = useCallback((queue: QueueSnapshot) => {
+    setState((current) => applyQueueSnapshot(current, queue));
+  }, []);
+  const applyTimer = useCallback((timer: TimerSnapshot) => {
+    setState((current) => applyTimerUpdate(current, timer));
+  }, []);
+
+  return {
+    ...connection,
+    ...state,
+    show: meta?.show ?? null,
+    boardId: meta?.boardId ?? null,
+    applyQueue,
+    applyTimer,
+  };
+}
+
+export type BoardRealtime = Connection & BoardState;
+
+/** Speaker Board subscription (board token). Follows the Program Queue's current item. */
+export function useBoardRealtime(token: string): BoardRealtime {
+  const [state, setState] = useState<BoardState>(emptyBoardState);
+  const connection = useSocket({ role: 'board', boardShareToken: token }, (socket, onSnapshot) => {
+    socket.on(realtimeEvents.boardSnapshot, (s: BoardStateSnapshot) => {
+      setState((current) => applyBoardSnapshot(current, s));
+      onSnapshot(s.serverTime);
+    });
+    socket.on(realtimeEvents.timer, (t) => {
+      setState((current) => applyBoardTimer(current, t));
+    });
+  });
+  return { ...connection, ...state };
 }

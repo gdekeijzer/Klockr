@@ -18,7 +18,11 @@ function phaseAt(durationMs: number, remainingMs: number) {
 
 describe('KLOCKR default thresholds: warning <= 20 %, critical <= 5 % of configured duration', () => {
   it('defaults are 20 % and 5 %', () => {
-    expect(DEFAULT_TIMER_THRESHOLDS).toEqual({ warningPercent: 20, criticalPercent: 5 });
+    expect(DEFAULT_TIMER_THRESHOLDS).toEqual({
+      kind: 'percent',
+      warningPercent: 20,
+      criticalPercent: 5,
+    });
   });
 
   it.each([
@@ -72,6 +76,7 @@ describe('KLOCKR default thresholds: warning <= 20 %, critical <= 5 % of configu
     expect(phaseAt(MINUTE_MS, -SECOND_MS)).toBe('overtime');
     expect(
       timerPhase(deriveTimer(running(MINUTE_MS), 2 * MINUTE_MS), {
+        kind: 'percent',
         warningPercent: 100,
         criticalPercent: 100,
       }),
@@ -87,9 +92,31 @@ describe('KLOCKR default thresholds: warning <= 20 %, critical <= 5 % of configu
   it('accepts explicit thresholds', () => {
     expect(
       timerPhase(deriveTimer(running(10 * MINUTE_MS), 0), {
+        kind: 'percent',
         warningPercent: 100,
         criticalPercent: 0,
       }),
     ).toBe('warning');
+  });
+});
+
+describe('absolute thresholds', () => {
+  const absolute = { kind: 'absolute', warningMs: 5 * MINUTE_MS, criticalMs: MINUTE_MS } as const;
+  const phase = (durationMs: number, remainingMs: number) =>
+    timerPhase(deriveTimer(running(durationMs), durationMs - remainingMs), absolute);
+
+  it('warning at 05:00 remaining, critical at 01:00 remaining, regardless of duration', () => {
+    expect(phase(20 * MINUTE_MS, 5 * MINUTE_MS + 1)).toBe('normal');
+    expect(phase(20 * MINUTE_MS, 5 * MINUTE_MS)).toBe('warning');
+    expect(phase(20 * MINUTE_MS, MINUTE_MS + 1)).toBe('warning');
+    expect(phase(20 * MINUTE_MS, MINUTE_MS)).toBe('critical');
+    expect(phase(20 * MINUTE_MS, -1)).toBe('overtime');
+  });
+
+  it('a timer shorter than the warning threshold is warning from its start (but idle is normal)', () => {
+    expect(phase(3 * MINUTE_MS, 3 * MINUTE_MS)).toBe('warning');
+    const idle = createTimer({ mode: 'countdown', durationMs: 3 * MINUTE_MS });
+    if (!idle.ok) throw new Error('setup');
+    expect(timerPhase(deriveTimer(idle.value, 0), absolute)).toBe('normal');
   });
 });

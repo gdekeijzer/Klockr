@@ -1,12 +1,14 @@
 'use client';
 
-import type { ShowStateSnapshot, TimerSnapshot } from '@klockr/contracts';
+import type { QueueItemSnapshot, QueueSnapshot, TimerSnapshot } from '@klockr/contracts';
 import { deriveTimer, timerPhase } from '@klockr/domain';
 import {
   colorVar,
   formatDuration,
+  formatThresholds,
   formatTimer,
   remainingFraction,
+  thresholdSourceLabel,
   timerDigitColor,
   timerPhaseChip,
   timerStatusChip,
@@ -14,16 +16,22 @@ import {
 import Link from 'next/link';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Chip } from '../../../components/Chip';
-import { connectionChip } from '../../../components/connection';
 import { ProgressBar } from '../../../components/ProgressBar';
-import { ApiError, createBoardShare, sendTimerCommand } from '../../../lib/api';
+import {
+  ApiError,
+  createBoardShare,
+  sendQueueCommand,
+  sendTimerCommand,
+  type QueueCommandBody,
+} from '../../../lib/api';
 import { parseDurationInput } from '../../../lib/duration-input';
 import { recallBoardToken, rememberBoardToken } from '../../../lib/storage';
-import { useRealtime } from '../../../lib/use-realtime';
+import { useShowRealtime } from '../../../lib/use-realtime';
 import { useServerNow } from '../../../lib/use-server-now';
-import styles from './operator.module.css';
+import { ShowFrame } from './show-frame';
+import styles from './show.module.css';
 
-type Command =
+type TimerAction =
   | { type: 'timer.start' | 'timer.pause' | 'timer.resume' | 'timer.stop' }
   | { type: 'timer.adjust'; deltaMs: number }
   | { type: 'timer.configure'; durationMs: number };
@@ -33,49 +41,25 @@ const ADJUSTMENTS = [-30_000, -10_000, 10_000, 30_000];
 const noSubscription = () => () => undefined;
 
 /**
- * Focused Operator View for the Quick Timer. All timer values are projections of the last
- * authoritative snapshot via the domain's `deriveTimer`; controls only send commands and the
- * UI changes when the server confirms (HTTP response or realtime update), never optimistically.
+ * Operator View: operate, not administer (FUNCTIONAL_DESIGN §24). Current item large with its
+ * timer and transport, END / END + NEXT as separate show control, Next and a compact Queue
+ * preview. Every value is a projection of the last authoritative state; controls only send
+ * commands, and the UI changes when the server confirms — never optimistically.
  */
 export function OperatorView({ showId }: { showId: string }) {
-  const rt = useRealtime<ShowStateSnapshot>({ role: 'operator', showId }, 'show.snapshot');
+  const rt = useShowRealtime(showId);
   const now = useServerNow(rt.offsetMs);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  if (rt.denied) {
-    return (
-      <main className={styles.denied}>
-        <div className={styles.brand}>KLOCKR</div>
-        <h1>No control access in this browser</h1>
-        <p>
-          This Show can only be operated from the browser that created it. Ask for the Speaker Board
-          link to follow along, or <Link href="/">create a new Quick Timer</Link>.
-        </p>
-      </main>
-    );
-  }
-
   const live = rt.status === 'connected';
+  const queue = rt.queue;
 
-  async function run(command: Command) {
-    if (!rt.timer || !live) return;
-    setPending(command.type);
+  async function act(label: string, run: () => Promise<void>) {
+    if (!live) return;
+    setPending(label);
     setError(null);
     try {
-      const base = { payload: { queueItemId: rt.timer.queueItemId } };
-      const timer = await sendTimerCommand(
-        showId,
-        command.type === 'timer.adjust'
-          ? { type: 'timer.adjust', payload: { ...base.payload, deltaMs: command.deltaMs } }
-          : command.type === 'timer.configure'
-            ? {
-                type: 'timer.configure',
-                payload: { ...base.payload, mode: 'countdown', durationMs: command.durationMs },
-              }
-            : { type: command.type, ...base },
-      );
-      rt.applyTimer(timer);
+      await run();
     } catch (e) {
       setError(`Not applied: ${e instanceof ApiError ? e.message : 'unknown error'}`);
     } finally {
@@ -83,125 +67,207 @@ export function OperatorView({ showId }: { showId: string }) {
     }
   }
 
+  const timerAction = (queueItemId: string, action: TimerAction) =>
+    act(action.type, async () => {
+      const payload = { queueItemId };
+      const timer = await sendTimerCommand(
+        showId,
+        action.type === 'timer.adjust'
+          ? { type: 'timer.adjust', payload: { ...payload, deltaMs: action.deltaMs } }
+          : action.type === 'timer.configure'
+            ? {
+                type: 'timer.configure',
+                payload: { ...payload, mode: 'countdown', durationMs: action.durationMs },
+              }
+            : { type: action.type, payload },
+      );
+      rt.applyTimer(timer);
+    });
+
+  const queueAction = (body: QueueCommandBody) =>
+    act(body.type, async () => {
+      const result = await sendQueueCommand(showId, body);
+      rt.applyQueue(result.queue);
+    });
+
+  const current = queue?.items.find((i) => i.id === queue.currentItemId) ?? null;
+  const next = queue?.items.find((i) => i.id === queue.nextItemId) ?? null;
+  const currentTimer = current ? (rt.timers[current.id] ?? null) : null;
+  const disabled = !live || pending !== null;
+
   return (
-    <div className={styles.shell}>
-      <header className={styles.header}>
-        <div className={styles.brand}>KLOCKR</div>
-        <div className="label">Operator view</div>
-        <div className={styles.showName}>
-          {rt.snapshot?.show.title ?? 'Quick Timer'}
-          <span className={`${styles.showId} mono`} title={showId} data-testid="show-id">
-            {showId.slice(0, 8)}
-          </span>
-        </div>
-        <div className={styles.headerRight}>
-          <Chip spec={connectionChip(rt.status)} testId="connection-status" />
-          <div className={styles.clock}>
-            <span className="label">Current time</span>
-            <span className="mono">{new Date(now).toLocaleTimeString([], { hour12: false })}</span>
-          </div>
-        </div>
-      </header>
-
-      {!live && rt.status !== 'connecting' && (
-        <div role="alert" className={styles.offlineBanner} data-testid="offline-banner">
-          <strong>Connection to the KLOCKR server lost.</strong> Controls are disabled until the
-          connection is restored. The timer shown continues from the last confirmed state.
-        </div>
-      )}
-
+    <ShowFrame showId={showId} view="operator" rt={rt} now={now}>
       <main className={styles.grid}>
-        {rt.timer ? (
-          <TimerPanel timer={rt.timer} now={now} />
-        ) : (
-          <section className={styles.panel} aria-busy>
-            <span className="label">Current timer</span>
-            <p className={styles.muted}>Loading Show State…</p>
-          </section>
-        )}
+        <div className={styles.column}>
+          {queue ? (
+            <CurrentPanel item={current} timer={currentTimer} now={now} />
+          ) : (
+            <section className={styles.panel} aria-busy>
+              <span className="label">Current</span>
+              <p className={styles.muted}>Loading Show State…</p>
+            </section>
+          )}
+          {queue && (
+            <Controls
+              current={current}
+              timer={currentTimer}
+              next={next}
+              disabled={disabled}
+              pending={pending}
+              error={error}
+              onTimer={(action) => {
+                if (current) void timerAction(current.id, action);
+              }}
+              onQueue={(body) => void queueAction(body)}
+            />
+          )}
+        </div>
 
         <aside className={styles.side}>
+          {queue && <NextPanel item={next} />}
+          {queue && (
+            <QueuePreview
+              queue={queue}
+              timers={rt.timers}
+              showId={showId}
+              disabled={disabled}
+              onQueue={(body) => void queueAction(body)}
+              onStopTimer={(id) => void timerAction(id, { type: 'timer.stop' })}
+            />
+          )}
           <SharePanel showId={showId} disabled={!live} />
-          {rt.snapshot && (
+          {rt.show && (
             <section className={styles.panel}>
               <span className="label">Anonymous show</span>
               <p className={styles.muted}>
-                Kept until {new Date(rt.snapshot.show.expiresAt).toLocaleDateString()} (7 days).
-                Only this browser can control it.
+                Kept until {new Date(rt.show.expiresAt).toLocaleDateString()} (7 days). Only this
+                browser can control it.
               </p>
             </section>
           )}
         </aside>
-
-        {rt.timer && (
-          <Controls
-            timer={rt.timer}
-            disabled={!live || pending !== null}
-            pending={pending}
-            error={error}
-            onCommand={(c) => void run(c)}
-          />
-        )}
       </main>
+    </ShowFrame>
+  );
+}
+
+function ThresholdLine({ item }: { item: QueueItemSnapshot }) {
+  const { rule, source } = item.effectiveWarning;
+  return (
+    <div className={styles.thresholds} data-testid="current-thresholds">
+      <span>{formatThresholds(rule)}</span>
+      <span className={styles.source} data-override={source !== 'show'}>
+        {thresholdSourceLabel(source)}
+      </span>
     </div>
   );
 }
 
-function TimerPanel({ timer, now }: { timer: TimerSnapshot; now: number }) {
-  const view = deriveTimer(timer, now);
-  const phase = timerPhase(view);
+function CurrentPanel(props: {
+  item: QueueItemSnapshot | null;
+  timer: TimerSnapshot | null;
+  now: number;
+}) {
+  const { item, timer, now } = props;
+  if (!item) {
+    return (
+      <section className={styles.panel} aria-label="Current item" data-testid="current-panel">
+        <span className="label">Current</span>
+        <p className={styles.currentTitle} data-testid="current-title">
+          —
+        </p>
+        <p className={styles.muted}>No item is current. Make the next item current to continue.</p>
+      </section>
+    );
+  }
+
+  const view = timer ? deriveTimer(timer, now) : null;
+  const phase = view ? timerPhase(view, item.effectiveWarning.rule) : 'normal';
   const phaseChip = timerPhaseChip(phase);
-  const target = timer.durationMs + timer.adjustmentMs;
   return (
-    <section className={`${styles.panel} ${styles.timerPanel}`} aria-label="Current timer">
+    <section
+      className={`${styles.panel} ${styles.timerPanel}`}
+      aria-label="Current item"
+      data-testid="current-panel"
+    >
       <div className={styles.timerTop}>
-        <span className="label">Current timer</span>
+        <span className="label">Current</span>
         <div className={styles.chips}>
+          {item.completedAt !== null && (
+            <Chip spec={{ label: 'ENDED', variant: 'neutral' }} testId="current-ended" />
+          )}
           {phaseChip && <Chip spec={phaseChip} testId="timer-phase" />}
-          <Chip spec={timerStatusChip(timer.status)} testId="timer-status" />
+          {timer && <Chip spec={timerStatusChip(timer.status)} testId="timer-status" />}
         </div>
       </div>
-      <div
-        className={`${styles.digits} mono`}
-        style={{ color: timerDigitColor(phase) }}
-        data-testid="operator-timer"
-        data-phase={phase}
-        aria-live="off"
-      >
-        {formatTimer(view)}
+      <div>
+        <h1 className={styles.currentTitle} data-testid="current-title">
+          {item.title}
+        </h1>
+        {item.subtitle && <p className={styles.subtitle}>{item.subtitle}</p>}
       </div>
-      <ProgressBar fraction={remainingFraction(view, target)} color={colorVar('accent-blue')} />
-      <dl className={styles.facts}>
-        <div>
-          <dt className="label">Elapsed</dt>
-          <dd className="mono">{formatDuration(view.elapsedMs)}</dd>
+
+      {timer && view ? (
+        <>
+          <div
+            className={`${styles.digits} mono`}
+            style={{ color: timerDigitColor(phase) }}
+            data-testid="operator-timer"
+            data-phase={phase}
+            aria-live="off"
+          >
+            {formatTimer(view)}
+          </div>
+          <ProgressBar
+            fraction={remainingFraction(view, timer.durationMs + timer.adjustmentMs)}
+            color={colorVar('accent-blue')}
+          />
+          <dl className={styles.facts}>
+            <div>
+              <dt className="label">Elapsed</dt>
+              <dd className="mono">{formatDuration(view.elapsedMs)}</dd>
+            </div>
+            <div>
+              <dt className="label">Target</dt>
+              <dd className="mono">{formatDuration(timer.durationMs)}</dd>
+            </div>
+            <div>
+              <dt className="label">Adjustment</dt>
+              <dd className="mono" data-testid="adjustment">
+                {timer.adjustmentMs === 0
+                  ? '±00:00'
+                  : `${timer.adjustmentMs > 0 ? '+' : '−'}${formatDuration(Math.abs(timer.adjustmentMs))}`}
+              </dd>
+            </div>
+          </dl>
+          <ThresholdLine item={item} />
+        </>
+      ) : (
+        <div className={styles.noTimer} data-testid="current-no-timer">
+          No timer
         </div>
-        <div>
-          <dt className="label">Target</dt>
-          <dd className="mono">{formatDuration(timer.durationMs)}</dd>
-        </div>
-        <div>
-          <dt className="label">Adjustment</dt>
-          <dd className="mono" data-testid="adjustment">
-            {timer.adjustmentMs === 0
-              ? '±00:00'
-              : `${timer.adjustmentMs > 0 ? '+' : '−'}${formatDuration(Math.abs(timer.adjustmentMs))}`}
-          </dd>
-        </div>
-      </dl>
+      )}
+      {item.notes && (
+        <p className={styles.notes} data-testid="current-notes">
+          {item.notes}
+        </p>
+      )}
     </section>
   );
 }
 
 function Controls(props: {
-  timer: TimerSnapshot;
+  current: QueueItemSnapshot | null;
+  timer: TimerSnapshot | null;
+  next: QueueItemSnapshot | null;
   disabled: boolean;
   pending: string | null;
   error: string | null;
-  onCommand: (c: Command) => void;
+  onTimer: (action: TimerAction) => void;
+  onQueue: (body: QueueCommandBody) => void;
 }) {
-  const { timer, disabled, onCommand } = props;
-  const status = timer.status;
+  const { current, timer, next, disabled, onTimer, onQueue } = props;
+  const status = timer?.status ?? null;
   const primary =
     status === 'running'
       ? { type: 'timer.pause' as const, label: 'Pause' }
@@ -214,57 +280,123 @@ function Controls(props: {
   const canStop = status === 'running' || status === 'paused';
   const canAdjust = status === 'idle' || status === 'running' || status === 'paused';
   const canConfigure = status === 'idle' || status === 'stopped';
+  const autoStart = next?.startMode === 'on_previous_end' && next.timer !== null;
 
   return (
-    <section className={`${styles.panel} ${styles.controls}`} aria-label="Timer controls">
-      <div className={styles.transport}>
-        <span className="label">Transport</span>
+    <section className={`${styles.panel} ${styles.controls}`} aria-label="Controls">
+      {timer && (
+        <>
+          <div className={styles.transport}>
+            <span className="label">Timer</span>
+            <div className={styles.buttons}>
+              <button
+                type="button"
+                className={`${styles.button} ${styles.primary}`}
+                data-kind={primary.type}
+                disabled={disabled}
+                onClick={() => {
+                  onTimer({ type: primary.type });
+                }}
+              >
+                {primary.label}
+              </button>
+              <button
+                type="button"
+                className={styles.button}
+                disabled={disabled || !canStop}
+                title="Stop this timer only. The item stays current; nothing else happens."
+                onClick={() => {
+                  onTimer({ type: 'timer.stop' });
+                }}
+              >
+                ■ Stop timer
+              </button>
+            </div>
+          </div>
+          <div className={styles.adjust}>
+            <span className="label">Adjust time</span>
+            <div className={styles.buttons}>
+              {ADJUSTMENTS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  className={`${styles.button} mono`}
+                  disabled={disabled || !canAdjust}
+                  aria-label={`${d > 0 ? 'Add' : 'Remove'} ${String(Math.abs(d) / 1000)} seconds`}
+                  onClick={() => {
+                    onTimer({ type: 'timer.adjust', deltaMs: d });
+                  }}
+                >
+                  {d > 0 ? '+' : '−'}
+                  {String(Math.abs(d) / 1000)}s
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className={styles.itemControls}>
+        <span className="label">Item</span>
         <div className={styles.buttons}>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.primary}`}
-            data-kind={primary.type}
-            disabled={disabled}
-            onClick={() => {
-              onCommand({ type: primary.type });
-            }}
-          >
-            {primary.label}
-          </button>
-          <button
-            type="button"
-            className={styles.button}
-            disabled={disabled || !canStop}
-            title="Stop this timer only. Does not end the item or trigger anything else."
-            onClick={() => {
-              onCommand({ type: 'timer.stop' });
-            }}
-          >
-            ■ Stop timer
-          </button>
-        </div>
-      </div>
-      <div className={styles.adjust}>
-        <span className="label">Adjust time</span>
-        <div className={styles.buttons}>
-          {ADJUSTMENTS.map((d) => (
+          {current ? (
+            <>
+              <button
+                type="button"
+                className={`${styles.button} ${styles.primary} ${styles.end}`}
+                disabled={disabled}
+                title="END: mark this item completed (stops a running timer). It stays current."
+                onClick={() => {
+                  onQueue({ type: 'item.end', payload: { queueItemId: current.id, next: false } });
+                }}
+              >
+                End
+              </button>
+              <button
+                type="button"
+                className={`${styles.button} ${styles.primary} ${styles.endNext}`}
+                disabled={disabled}
+                aria-label="End + Next"
+                title={
+                  autoStart
+                    ? 'END this item, make the next item current and START its timer (its start mode).'
+                    : 'END this item and make the next item current. Its timer does not start.'
+                }
+                onClick={() => {
+                  onQueue({ type: 'item.end', payload: { queueItemId: current.id, next: true } });
+                }}
+              >
+                End + Next
+                <small data-testid="end-next-hint">
+                  {next ? `→ ${next.title}${autoStart ? ' · starts timer' : ''}` : '→ end of queue'}
+                </small>
+              </button>
+            </>
+          ) : (
             <button
-              key={d}
               type="button"
-              className={`${styles.button} mono`}
-              disabled={disabled || !canAdjust}
-              aria-label={`${d > 0 ? 'Add' : 'Remove'} ${String(Math.abs(d) / 1000)} seconds`}
+              className={`${styles.button} ${styles.primary} ${styles.endNext}`}
+              disabled={disabled || !next}
               onClick={() => {
-                onCommand({ type: 'timer.adjust', deltaMs: d });
+                if (next) onQueue({ type: 'queue.setCurrent', payload: { queueItemId: next.id } });
               }}
             >
-              {d > 0 ? '+' : '−'}
-              {String(Math.abs(d) / 1000)}s
+              Make next current
             </button>
-          ))}
+          )}
         </div>
       </div>
-      {canConfigure && <DurationForm disabled={disabled} timer={timer} onCommand={onCommand} />}
+
+      {timer && canConfigure && (
+        <DurationForm
+          key={`${timer.queueItemId}:${String(timer.durationMs)}`}
+          disabled={disabled}
+          durationMs={timer.durationMs}
+          onSubmit={(ms) => {
+            onTimer({ type: 'timer.configure', durationMs: ms });
+          }}
+        />
+      )}
       {props.pending && <p className={styles.muted}>Waiting for server confirmation…</p>}
       {props.error && (
         <p role="alert" className={styles.error}>
@@ -276,18 +408,18 @@ function Controls(props: {
 }
 
 function DurationForm(props: {
-  timer: TimerSnapshot;
+  durationMs: number;
   disabled: boolean;
-  onCommand: (c: Command) => void;
+  onSubmit: (ms: number) => void;
 }) {
-  const [text, setText] = useState(() => formatDuration(props.timer.durationMs));
+  const [text, setText] = useState(() => formatDuration(props.durationMs));
   const ms = parseDurationInput(text);
   return (
     <form
       className={styles.duration}
       onSubmit={(e) => {
         e.preventDefault();
-        if (ms !== null) props.onCommand({ type: 'timer.configure', durationMs: ms });
+        if (ms !== null) props.onSubmit(ms);
       }}
     >
       <label className="label" htmlFor="set-duration">
@@ -306,6 +438,141 @@ function DurationForm(props: {
         Set duration
       </button>
     </form>
+  );
+}
+
+function NextPanel({ item }: { item: QueueItemSnapshot | null }) {
+  return (
+    <section className={styles.panel} aria-label="Next item" data-testid="next-panel">
+      <div className={styles.panelHead}>
+        <span className="label">Next</span>
+        {item?.startMode === 'on_previous_end' && item.timer && (
+          <Chip spec={{ label: 'AUTO-START', variant: 'info' }} testId="next-autostart" />
+        )}
+      </div>
+      {item ? (
+        <>
+          <p className={styles.nextTitle} data-testid="next-title">
+            {item.title}
+          </p>
+          {item.subtitle && <p className={styles.subtitle}>{item.subtitle}</p>}
+          <span className="mono">
+            {item.timer ? formatDuration(item.timer.durationMs) : 'No timer'}
+          </span>
+          {item.notes && <p className={styles.notes}>{item.notes}</p>}
+        </>
+      ) : (
+        <p className={styles.muted} data-testid="next-title">
+          End of queue
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** Compact rundown around Current: a few previous items, Current, and what comes next. */
+function QueuePreview(props: {
+  queue: QueueSnapshot;
+  timers: Readonly<Record<string, TimerSnapshot>>;
+  showId: string;
+  disabled: boolean;
+  onQueue: (body: QueueCommandBody) => void;
+  onStopTimer: (queueItemId: string) => void;
+}) {
+  const { queue, timers } = props;
+  const items = queue.items;
+  const anchor = Math.max(
+    0,
+    queue.currentItemId
+      ? items.findIndex((i) => i.id === queue.currentItemId)
+      : items.findIndex((i) => i.id === queue.nextItemId),
+  );
+  const from = Math.max(0, anchor - 2);
+  const visible = items.slice(from, anchor + 7);
+
+  return (
+    <section className={styles.panel} aria-label="Queue">
+      <div className={styles.panelHead}>
+        <span className="label">Queue</span>
+        <Link className={styles.link} href={`/show/${props.showId}/edit`}>
+          Edit queue
+        </Link>
+      </div>
+      <ol className={styles.list} data-testid="queue-preview">
+        {visible.map((item) => {
+          const index = items.indexOf(item) + 1;
+          const timer = timers[item.id];
+          const running = timer?.status === 'running' || timer?.status === 'paused';
+          const isNext = item.id === queue.nextItemId;
+          return (
+            <li
+              key={item.id}
+              className={styles.row}
+              data-lifecycle={item.lifecycle}
+              data-testid="queue-row"
+              data-title={item.title}
+            >
+              <span className={`${styles.rowIndex} mono`}>{String(index).padStart(2, '0')}</span>
+              <span className={styles.rowMain}>
+                <span className={styles.rowTitle}>{item.title}</span>
+                {item.timer && (
+                  <span className={`${styles.rowSub} mono`}>
+                    {formatDuration(item.timer.durationMs)}
+                  </span>
+                )}
+              </span>
+              <span className={styles.rowMeta}>
+                {item.lifecycle === 'current' && <span className={styles.tag}>CURRENT</span>}
+                {isNext && (
+                  <span className={styles.tag} data-kind="next">
+                    NEXT
+                  </span>
+                )}
+                {item.lifecycle === 'completed' && <span className={styles.tag}>DONE</span>}
+                {item.lifecycle === 'inactive' && <span className={styles.tag}>SKIP</span>}
+                {running && item.lifecycle !== 'current' && (
+                  <span className={styles.tag} data-kind="running">
+                    {timer.status === 'running' ? 'RUNNING' : 'PAUSED'}
+                  </span>
+                )}
+              </span>
+              <span className={styles.rowActions}>
+                {running && item.lifecycle !== 'current' && (
+                  <button
+                    type="button"
+                    className={`${styles.button} ${styles.small}`}
+                    disabled={props.disabled}
+                    aria-label={`Stop running timer: ${item.title}`}
+                    onClick={() => {
+                      props.onStopTimer(item.id);
+                    }}
+                  >
+                    ■
+                  </button>
+                )}
+                {item.lifecycle !== 'current' && item.active && (
+                  <button
+                    type="button"
+                    className={`${styles.button} ${styles.small}`}
+                    disabled={props.disabled}
+                    aria-label={`Make current: ${item.title}`}
+                    title="Make this item current (does not start or stop any timer)"
+                    onClick={() => {
+                      props.onQueue({
+                        type: 'queue.setCurrent',
+                        payload: { queueItemId: item.id },
+                      });
+                    }}
+                  >
+                    Go to
+                  </button>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 
@@ -340,7 +607,8 @@ function SharePanel({ showId, disabled }: { showId: string; disabled: boolean })
     <section className={styles.panel} aria-label="Share Speaker Board">
       <span className="label">Share Speaker Board</span>
       <p className={styles.muted}>
-        Read-only link for the presenter display. It cannot control the timer.
+        Read-only link for the presenter display. It follows the current item and cannot control
+        anything.
       </p>
       {url ? (
         <>

@@ -141,3 +141,16 @@ Show stores ownership/lifecycle state sufficient to identify:
 | `idempotency_records` | (scope, key) -> fingerprint, result JSON |
 
 Timer writes are compare-and-set on `revision`. All child rows cascade on Show deletion (for the future cleanup worker).
+
+## Implemented in M2 (migration `0002_queue_operations`)
+
+| Table | Change |
+| --- | --- |
+| `shows` | + `warning_rule` jsonb, default `{"kind":"percent","warningPercent":20,"criticalPercent":5}` (Show default thresholds) |
+| `queues` | + `current_item_id` (FK `queue_items`, on delete set null), `warning_rule` jsonb null (Queue override), `revision` int (aggregate compare-and-set) |
+| `queue_groups` (new) | id, queue_id (cascade), title, position, created_at, updated_at. One level only |
+| `queue_items` | + `group_id` (FK `queue_groups`, cascade), `subtitle`, `notes`, `tags` text[], `active`, `completed_at`, `start_mode` (`manual`/`on_previous_end`), `warning_rule` jsonb null (Item override), `created_at`, `updated_at`, `revision` |
+
+No `next` column: next is derived. No separate tables for Speaker/Note/Break: presets fill the same `queue_items` row. The migration also sets `current_item_id` of existing M1 Quick Timer Queues to their single item.
+
+Writes go through `PgShowStore.saveQueue(prev, next)`: one transaction that claims the Queue revision (compare-and-set), then writes only what differs (groups, items by item revision, timers with per-timer compare-and-set), removes deleted rows and finally updates the current pointer. Any lost race rolls back everything.

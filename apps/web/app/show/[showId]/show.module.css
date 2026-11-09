@@ -1,0 +1,477 @@
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--k-spacing-6);
+  padding: var(--k-spacing-3) var(--k-spacing-6);
+  background: var(--k-background-chrome);
+  border-bottom: 1px solid var(--k-border-subtle);
+}
+
+.brand {
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 0.16em;
+}
+
+.showName {
+  display: flex;
+  align-items: baseline;
+  gap: var(--k-spacing-2);
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.showId {
+  font-size: 12px;
+  color: var(--k-text-muted);
+}
+
+.headerRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--k-spacing-6);
+}
+
+.clock {
+  display: grid;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.offlineBanner {
+  padding: var(--k-spacing-3) var(--k-spacing-6);
+  background: var(--k-background-surface-raised);
+  border-bottom: 2px solid var(--k-state-warning);
+  color: var(--k-text-primary);
+}
+
+.grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: var(--k-spacing-4);
+  padding: var(--k-spacing-4);
+  align-content: start;
+}
+
+.panel {
+  display: grid;
+  gap: var(--k-spacing-3);
+  align-content: start;
+  padding: var(--k-spacing-5);
+  background: var(--k-background-surface);
+  border: 1px solid var(--k-border-subtle);
+  border-radius: var(--k-radius-panel);
+}
+
+.side {
+  display: grid;
+  gap: var(--k-spacing-4);
+  align-content: start;
+}
+
+.timerPanel {
+  gap: var(--k-spacing-4);
+}
+
+.timerTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chips {
+  display: flex;
+  gap: var(--k-spacing-2);
+}
+
+.digits {
+  font-size: clamp(88px, 12vw, 176px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+}
+
+.facts dd {
+  margin: var(--k-spacing-1) 0 0;
+  font-size: 22px;
+}
+
+.controls {
+  grid-template-columns: repeat(3, auto);
+  justify-content: start;
+  align-items: start;
+  gap: var(--k-spacing-6);
+}
+
+.transport,
+.adjust {
+  display: grid;
+  gap: var(--k-spacing-2);
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--k-spacing-2);
+}
+
+.button {
+  min-height: 48px;
+  min-width: 72px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--k-spacing-4);
+  background: var(--k-background-control);
+  border: 1px solid var(--k-border-subtle);
+  border-radius: var(--k-radius-control);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--k-background-control-hover);
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.primary {
+  min-width: 140px;
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* GO actions use the operational "ok" color; PAUSE is a neutral product action (blue edge). */
+.primary[data-kind='timer.start'],
+.primary[data-kind='timer.resume'] {
+  background: var(--k-state-ok);
+  border-color: var(--k-state-ok);
+  color: var(--k-background-canvas);
+}
+
+.primary[data-kind='timer.start']:hover:not(:disabled),
+.primary[data-kind='timer.resume']:hover:not(:disabled) {
+  background: var(--k-state-ok);
+  filter: brightness(1.1);
+}
+
+.primary[data-kind='timer.pause'] {
+  border: 2px solid var(--k-accent-blue);
+}
+
+.duration {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto 140px auto;
+  align-items: center;
+  gap: var(--k-spacing-2);
+  justify-self: start;
+}
+
+.input {
+  min-height: 44px;
+  padding: 0 var(--k-spacing-3);
+  background: var(--k-background-control);
+  border: 1px solid var(--k-border-strong);
+  border-radius: var(--k-radius-control);
+  width: 100%;
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--k-state-warning);
+}
+
+.muted {
+  margin: 0;
+  color: var(--k-text-secondary);
+}
+
+.error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--k-state-critical);
+  font-weight: 600;
+}
+
+.denied {
+  max-width: 560px;
+  margin: 15vh auto;
+  padding: var(--k-spacing-6);
+  display: grid;
+  gap: var(--k-spacing-4);
+}
+
+.denied a {
+  color: var(--k-accent-blue-strong);
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- M2: shared Show shell (Operator View + Queue Editor) ------------------------------------ */
+
+.tabs {
+  display: flex;
+  gap: var(--k-spacing-1);
+}
+
+.tab {
+  padding: var(--k-spacing-2) var(--k-spacing-3);
+  border-radius: var(--k-radius-control);
+  color: var(--k-text-secondary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.tab[aria-current='page'] {
+  color: var(--k-text-primary);
+  background: var(--k-background-control);
+  box-shadow: inset 0 -2px 0 var(--k-accent-blue);
+}
+
+.column {
+  display: grid;
+  gap: var(--k-spacing-4);
+  align-content: start;
+  min-width: 0;
+}
+
+.panelHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--k-spacing-3);
+}
+
+.currentTitle {
+  margin: 0;
+  font-size: clamp(28px, 3.4vw, 44px);
+  font-weight: 700;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 18px;
+  color: var(--k-text-secondary);
+}
+
+.notes {
+  margin: 0;
+  padding: var(--k-spacing-3);
+  white-space: pre-wrap;
+  background: var(--k-background-surface-raised);
+  border-left: 3px solid var(--k-border-strong);
+  border-radius: var(--k-radius-control);
+  color: var(--k-text-primary);
+}
+
+.noTimer {
+  font-size: 22px;
+  color: var(--k-text-muted);
+}
+
+.thresholds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-spacing-2);
+  color: var(--k-text-secondary);
+  font-size: 13px;
+}
+
+/* Compact override marker: inherited values are plain, overrides are marked. */
+.source {
+  padding: 1px 8px;
+  border-radius: var(--k-radius-pill);
+  border: 1px solid var(--k-border-strong);
+  color: var(--k-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.source[data-override='true'] {
+  border-color: var(--k-accent-blue);
+  color: var(--k-accent-blue-strong);
+}
+
+.nextTitle {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+/* END / NEXT is show control: neutral, strongly outlined, separate from timer transport. */
+.end {
+  border: 2px solid var(--k-border-strong);
+}
+
+.endNext {
+  border: 2px solid var(--k-accent-blue);
+  min-width: 180px;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.endNext small {
+  font-weight: 500;
+  color: var(--k-text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.itemControls {
+  display: grid;
+  gap: var(--k-spacing-2);
+}
+
+/* --- Queue list (Operator preview and Editor rundown) ---------------------------------------- */
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--k-spacing-2);
+  min-height: 44px;
+  padding: var(--k-spacing-1) var(--k-spacing-2);
+  border-radius: var(--k-radius-control);
+  background: var(--k-background-surface);
+  border-left: 3px solid transparent;
+}
+
+/* Current: unmistakable (strong edge + raised surface), distinct from selected and running. */
+.row[data-lifecycle='current'] {
+  background: var(--k-background-surface-raised);
+  border-left-color: var(--k-text-primary);
+}
+
+.row[data-lifecycle='current'] .rowTitle {
+  font-weight: 700;
+}
+
+.row[data-lifecycle='completed'] .rowTitle,
+.row[data-lifecycle='completed'] .rowIndex {
+  color: var(--k-text-muted);
+}
+
+/* Inactive: recognisable, but never competing with active items. */
+.row[data-lifecycle='inactive'] {
+  opacity: 0.55;
+}
+
+.row[data-lifecycle='inactive'] .rowTitle {
+  text-decoration: line-through;
+  text-decoration-color: var(--k-text-muted);
+}
+
+/* Selected (inspecting/editing) is a blue outline, never a fill. */
+.row[data-selected='true'] {
+  outline: 2px solid var(--k-accent-blue);
+  outline-offset: -2px;
+}
+
+.row[data-drop='true'] {
+  box-shadow: inset 0 3px 0 var(--k-accent-blue);
+}
+
+.rowIndex {
+  color: var(--k-text-secondary);
+  text-align: right;
+}
+
+.rowMain {
+  display: grid;
+  min-width: 0;
+}
+
+.rowTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowSub {
+  font-size: 12px;
+  color: var(--k-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--k-spacing-2);
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--k-spacing-1);
+}
+
+.small {
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0 var(--k-spacing-2);
+  font-size: 12px;
+}
+
+.tag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--k-text-secondary);
+}
+
+.tag[data-kind='next'] {
+  color: var(--k-accent-blue-strong);
+}
+
+.tag[data-kind='running'] {
+  color: var(--k-state-ok);
+}
+
+.link {
+  color: var(--k-accent-blue-strong);
+}
+
+.adjust .buttons {
+  flex-wrap: nowrap;
+}

@@ -5,7 +5,8 @@ import type {
   EpochMs,
   GrantId,
   Permission,
-  QueueItem,
+  QueueAggregate,
+  QueueId,
   QueueItemId,
   QuickTimerShow,
   Result,
@@ -57,12 +58,25 @@ export interface ShowRepository extends ShowLocator {
   /** Persist all parts of a new Quick Timer Show and its grants atomically. */
   createQuickTimerShow(bundle: QuickTimerShow, grants: readonly NewGrantRecord[]): Promise<void>;
   getShow(showId: ShowId): Promise<Show | null>;
-  /** The Show's program item (Quick Timer: its only item). */
-  getPrimaryItem(showId: ShowId): Promise<QueueItem | null>;
   getBoard(boardId: BoardId): Promise<Board | null>;
   getBoardOfShow(showId: ShowId): Promise<Board | null>;
   /** Record management activity (feeds anonymous lifecycle/cleanup protection). */
   touch(showId: ShowId, at: EpochMs): Promise<void>;
+}
+
+/**
+ * Queue persistence. A Queue (with its Groups, Items, item timers and the Show warning default it
+ * inherits) is one consistency boundary.
+ */
+export interface QueueRepository {
+  loadQueue(queueId: QueueId): Promise<QueueAggregate | null>;
+  /**
+   * Atomically persist `next` (one transaction): only if the stored Queue revision still equals
+   * `prev.queue.revision` and every timer that differs between `prev` and `next` still has the
+   * revision it had in `prev` (compare-and-set). Otherwise nothing is written and
+   * `revision_conflict` is returned. Unchanged items/timers are not rewritten.
+   */
+  saveQueue(prev: QueueAggregate, next: QueueAggregate): Promise<Result<void, AppError>>;
 }
 
 export interface GrantRepository {
@@ -109,11 +123,21 @@ export interface TimerTransitionedEvent {
   readonly occurredAt: EpochMs;
 }
 
-export type ApplicationEvent = TimerTransitionedEvent;
+/** A committed Queue change (structure, current/next, lifecycle, overrides, timers via END). */
+export interface QueueChangedEvent {
+  readonly type: 'queue.changed';
+  readonly commandId: string;
+  readonly commandType: string;
+  readonly showId: ShowId;
+  readonly aggregate: QueueAggregate;
+  readonly occurredAt: EpochMs;
+}
+
+export type ApplicationEvent = TimerTransitionedEvent | QueueChangedEvent;
 
 /**
  * Receives committed transitions (realtime hub, future Actions). Delivery failures must never
- * roll back or block the core timer engine.
+ * roll back or block the core timer engine or Queue operation.
  */
 export interface EventPublisher {
   publish(event: ApplicationEvent): Promise<void>;

@@ -110,3 +110,9 @@ Anonymous cleanup verifies expiry, active-use protection and grace/safety policy
 - **Rate limits:** Show creation 20/min/IP, board state 120/min/IP, realtime handshakes 60/min/IP (in-process; one server instance). The server trusts `X-Forwarded-For` and must only be reachable through the reverse proxy.
 - **Logging:** cookie, authorization and set-cookie headers are redacted; realtime logs contain role, Show id and rejection reason only.
 - Not yet: credential revocation UI, PIN/expiry on board links, cleanup of expired anonymous Shows (worker), CSP headers.
+
+## Implemented in M2
+
+- New capabilities: `queue.read`, `queue.manage` (structure, content, overrides), `item.control` (current, END / NEXT), `show.manage` (Show defaults). `anonymous_owner` bundles all of them for its own Show; `board_share` still has only `board.read`. Each Queue command declares its capability (`permissionFor()` in `packages/application/src/queue/queue-commands.ts`); no role-name checks.
+- A board token can never send commands: the commands endpoint only accepts the owner cookie (a bearer board token gets 401), and the application layer denies board actors independently (tested at unit, server and PostgreSQL level).
+- Board projections contain only the current item's title/subtitle, effective thresholds and timer — never notes, tags, other items or management data. User text is rendered as React text (escaped), never as HTML.

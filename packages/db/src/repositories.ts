@@ -1,16 +1,19 @@
-import type {
-  AppError,
-  GrantRepository,
-  IdempotencyStore,
-  NewGrantRecord,
-  ShowRepository,
-  StoredOutcome,
-  TimerRepository,
+import {
+  changedTimers,
+  type AppError,
+  type GrantRepository,
+  type IdempotencyStore,
+  type NewGrantRecord,
+  type QueueRepository,
+  type ShowRepository,
+  type StoredOutcome,
+  type TimerRepository,
 } from '@klockr/application';
 import {
   BoardId,
   err,
   GrantId,
+  GroupId,
   ok,
   QueueId,
   QueueItemId,
@@ -19,24 +22,30 @@ import {
   type Board,
   type EpochMs,
   type GrantKind,
+  type Group,
+  type QueueAggregate,
   type QueueItem,
   type QuickTimerShow,
   type Result,
   type Show,
+  type StartMode,
   type TimerMode,
   type TimerState,
   type TimerStatus,
+  type TimerThresholds,
 } from '@klockr/domain';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { Database } from './client';
 import {
   accessGrants,
   boards,
   idempotencyRecords,
   itemTimers,
+  queueGroups,
   queueItems,
   queues,
   shows,
+  type ThresholdRuleJson,
 } from './schema';
 
 const toDate = (ms: EpochMs): Date => new Date(ms);
@@ -47,6 +56,89 @@ const toMsOrNull = (d: Date | null): EpochMs | null => (d === null ? null : d.ge
 type TimerRow = typeof itemTimers.$inferSelect;
 type GrantRow = typeof accessGrants.$inferSelect;
 type ShowRow = typeof shows.$inferSelect;
+type ItemRow = typeof queueItems.$inferSelect;
+type GroupRow = typeof queueGroups.$inferSelect;
+
+function ruleFromJson(json: ThresholdRuleJson): TimerThresholds {
+  return json.kind === 'absolute'
+    ? { kind: 'absolute', warningMs: json.warningMs ?? 0, criticalMs: json.criticalMs ?? 0 }
+    : {
+        kind: 'percent',
+        warningPercent: json.warningPercent ?? 0,
+        criticalPercent: json.criticalPercent ?? 0,
+      };
+}
+const ruleOrNull = (json: ThresholdRuleJson | null): TimerThresholds | null =>
+  json === null ? null : ruleFromJson(json);
+const ruleToJson = (rule: TimerThresholds): ThresholdRuleJson => ({ ...rule });
+const ruleToJsonOrNull = (rule: TimerThresholds | null): ThresholdRuleJson | null =>
+  rule === null ? null : ruleToJson(rule);
+
+function itemFromRow(row: ItemRow, timer: TimerRow | null): QueueItem {
+  return {
+    id: QueueItemId(row.id),
+    queueId: QueueId(row.queueId),
+    groupId: row.groupId === null ? null : GroupId(row.groupId),
+    title: row.title,
+    subtitle: row.subtitle,
+    notes: row.notes,
+    tags: row.tags,
+    position: row.position,
+    active: row.active,
+    completedAt: toMsOrNull(row.completedAt),
+    startMode: row.startMode as StartMode,
+    warning: ruleOrNull(row.warningRule),
+    timer: timer ? timerFromRow(timer) : null,
+    createdAt: toMs(row.createdAt),
+    updatedAt: toMs(row.updatedAt),
+    revision: row.revision,
+  };
+}
+
+function itemColumns(item: QueueItem) {
+  return {
+    id: item.id,
+    queueId: item.queueId,
+    groupId: item.groupId,
+    title: item.title,
+    subtitle: item.subtitle,
+    notes: item.notes,
+    tags: [...item.tags],
+    position: item.position,
+    active: item.active,
+    completedAt: toDateOrNull(item.completedAt),
+    startMode: item.startMode,
+    warningRule: ruleToJsonOrNull(item.warning),
+    createdAt: toDate(item.createdAt),
+    updatedAt: toDate(item.updatedAt),
+    revision: item.revision,
+  };
+}
+
+function groupFromRow(row: GroupRow): Group {
+  return {
+    id: GroupId(row.id),
+    queueId: QueueId(row.queueId),
+    title: row.title,
+    position: row.position,
+    createdAt: toMs(row.createdAt),
+    updatedAt: toMs(row.updatedAt),
+  };
+}
+
+function groupColumns(group: Group) {
+  return {
+    id: group.id,
+    queueId: group.queueId,
+    title: group.title,
+    position: group.position,
+    createdAt: toDate(group.createdAt),
+    updatedAt: toDate(group.updatedAt),
+  };
+}
+
+/** Thrown inside a transaction to roll it back on a lost compare-and-set. */
+class RevisionConflict extends Error {}
 
 function timerFromRow(row: TimerRow): TimerState {
   return {
@@ -111,11 +203,14 @@ function showFromRow(row: ShowRow): Show {
     createdAt: toMs(row.createdAt),
     lastActiveAt: toMs(row.lastActiveAt),
     expiresAt: toMs(row.expiresAt),
+    warning: ruleFromJson(row.warningRule),
   };
 }
 
-/** PostgreSQL adapter for the Show/Timer/Grant persistence ports. */
-export class PgShowStore implements ShowRepository, TimerRepository, GrantRepository {
+/** PostgreSQL adapter for the Show/Queue/Timer/Grant persistence ports. */
+export class PgShowStore
+  implements ShowRepository, QueueRepository, TimerRepository, GrantRepository
+{
   constructor(private readonly db: Database) {}
 
   async createQuickTimerShow(
@@ -132,6 +227,7 @@ export class PgShowStore implements ShowRepository, TimerRepository, GrantReposi
         createdAt: toDate(show.createdAt),
         lastActiveAt: toDate(show.lastActiveAt),
         expiresAt: toDate(show.expiresAt),
+        warningRule: ruleToJson(show.warning),
       });
       await tx.insert(queues).values({
         id: queue.id,
@@ -139,13 +235,15 @@ export class PgShowStore implements ShowRepository, TimerRepository, GrantReposi
         name: queue.name,
         purpose: queue.purpose,
         position: queue.position,
+        warningRule: ruleToJsonOrNull(queue.warning),
+        revision: queue.revision,
       });
-      await tx.insert(queueItems).values({
-        id: item.id,
-        queueId: item.queueId,
-        title: item.title,
-        position: item.position,
-      });
+      await tx.insert(queueItems).values(itemColumns(item));
+      // The current pointer references the item, so it is set once the item exists.
+      await tx
+        .update(queues)
+        .set({ currentItemId: queue.currentItemId })
+        .where(eq(queues.id, queue.id));
       await tx.insert(itemTimers).values({
         queueItemId: item.id,
         ...timerColumns(item.timer),
@@ -166,23 +264,141 @@ export class PgShowStore implements ShowRepository, TimerRepository, GrantReposi
     return row ? showFromRow(row) : null;
   }
 
-  async getPrimaryItem(showId: ShowId): Promise<QueueItem | null> {
-    const [row] = await this.db
-      .select({ item: queueItems, timer: itemTimers })
-      .from(shows)
-      .innerJoin(queueItems, eq(queueItems.queueId, shows.primaryQueueId))
-      .leftJoin(itemTimers, eq(itemTimers.queueItemId, queueItems.id))
-      .where(eq(shows.id, showId))
-      .orderBy(asc(queueItems.position))
+  async loadQueue(queueId: QueueId): Promise<QueueAggregate | null> {
+    const [head] = await this.db
+      .select({ queue: queues, showWarning: shows.warningRule })
+      .from(queues)
+      .innerJoin(shows, eq(shows.id, queues.showId))
+      .where(eq(queues.id, queueId))
       .limit(1);
-    if (!row) return null;
+    if (!head) return null;
+    const [groupRows, itemRows] = await Promise.all([
+      this.db.select().from(queueGroups).where(eq(queueGroups.queueId, queueId)),
+      this.db
+        .select({ item: queueItems, timer: itemTimers })
+        .from(queueItems)
+        .leftJoin(itemTimers, eq(itemTimers.queueItemId, queueItems.id))
+        .where(eq(queueItems.queueId, queueId)),
+    ]);
+    const q = head.queue;
     return {
-      id: QueueItemId(row.item.id),
-      queueId: QueueId(row.item.queueId),
-      title: row.item.title,
-      position: row.item.position,
-      timer: row.timer ? timerFromRow(row.timer) : null,
+      showId: ShowId(q.showId),
+      showWarning: ruleFromJson(head.showWarning),
+      queue: {
+        id: QueueId(q.id),
+        showId: ShowId(q.showId),
+        name: q.name,
+        purpose: 'program',
+        position: q.position,
+        currentItemId: q.currentItemId === null ? null : QueueItemId(q.currentItemId),
+        warning: ruleOrNull(q.warningRule),
+        revision: q.revision,
+      },
+      groups: groupRows.map(groupFromRow),
+      items: itemRows.map((r) => itemFromRow(r.item, r.timer)),
     };
+  }
+
+  /**
+   * One transaction: compare-and-set on the Queue revision (also serializes concurrent Queue
+   * writers via the row lock), then write only what differs — groups, items, timers (each timer
+   * compare-and-set on its own revision) — and finally the current pointer. Any lost race rolls
+   * everything back, so END + NEXT is all-or-nothing.
+   */
+  async saveQueue(prev: QueueAggregate, next: QueueAggregate): Promise<Result<void, AppError>> {
+    try {
+      await this.db.transaction(async (tx) => {
+        const claimed = await tx
+          .update(queues)
+          .set({ revision: next.queue.revision })
+          .where(and(eq(queues.id, prev.queue.id), eq(queues.revision, prev.queue.revision)))
+          .returning({ id: queues.id });
+        if (claimed.length === 0) throw new RevisionConflict();
+
+        if (next.showWarning !== prev.showWarning) {
+          await tx
+            .update(shows)
+            .set({ warningRule: ruleToJson(next.showWarning) })
+            .where(eq(shows.id, next.showId));
+        }
+
+        const prevGroups = new Map(prev.groups.map((g) => [g.id, g]));
+        for (const group of next.groups) {
+          const before = prevGroups.get(group.id);
+          if (!before) await tx.insert(queueGroups).values(groupColumns(group));
+          else if (before !== group) {
+            await tx
+              .update(queueGroups)
+              .set(groupColumns(group))
+              .where(eq(queueGroups.id, group.id));
+          }
+        }
+
+        const prevItems = new Map(prev.items.map((i) => [i.id, i]));
+        for (const item of next.items) {
+          const before = prevItems.get(item.id);
+          if (!before) await tx.insert(queueItems).values(itemColumns(item));
+          else if (before.revision !== item.revision) {
+            await tx.update(queueItems).set(itemColumns(item)).where(eq(queueItems.id, item.id));
+          }
+        }
+
+        for (const change of changedTimers(prev, next)) {
+          if (change.before === null && change.after !== null) {
+            await tx.insert(itemTimers).values({
+              queueItemId: change.id,
+              ...timerColumns(change.after),
+              updatedAt: new Date(),
+            });
+            continue;
+          }
+          if (change.before === null) continue;
+          const guard = and(
+            eq(itemTimers.queueItemId, change.id),
+            eq(itemTimers.revision, change.before.revision),
+          );
+          const written =
+            change.after === null
+              ? await tx.delete(itemTimers).where(guard).returning({ id: itemTimers.queueItemId })
+              : await tx
+                  .update(itemTimers)
+                  .set({ ...timerColumns(change.after), updatedAt: new Date() })
+                  .where(guard)
+                  .returning({ id: itemTimers.queueItemId });
+          if (written.length === 0) throw new RevisionConflict();
+        }
+
+        const nextItemIds = new Set(next.items.map((i) => i.id));
+        const removedItems = prev.items.filter((i) => !nextItemIds.has(i.id)).map((i) => i.id);
+        if (removedItems.length > 0) {
+          await tx.delete(queueItems).where(inArray(queueItems.id, removedItems));
+        }
+        const nextGroupIds = new Set(next.groups.map((g) => g.id));
+        const removedGroups = prev.groups.filter((g) => !nextGroupIds.has(g.id)).map((g) => g.id);
+        if (removedGroups.length > 0) {
+          await tx.delete(queueGroups).where(inArray(queueGroups.id, removedGroups));
+        }
+
+        if (
+          next.queue.currentItemId !== prev.queue.currentItemId ||
+          next.queue.warning !== prev.queue.warning
+        ) {
+          await tx
+            .update(queues)
+            .set({
+              currentItemId: next.queue.currentItemId,
+              warningRule: ruleToJsonOrNull(next.queue.warning),
+            })
+            .where(eq(queues.id, next.queue.id));
+        }
+      });
+      return ok(undefined);
+    } catch (error) {
+      if (error instanceof RevisionConflict) {
+        return err({ code: 'revision_conflict', message: 'Queue was modified concurrently' });
+      }
+      throw error;
+    }
   }
 
   async getBoard(boardId: BoardId): Promise<Board | null> {

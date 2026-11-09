@@ -51,3 +51,16 @@ describe('timer presentation', () => {
     expect(timerDigitColor('overtime')).toBe('var(--k-state-critical)');
   });
 });
+
+describe('threshold presentation', () => {
+  it('summarizes percent and absolute rules and names the source', async () => {
+    const { formatThresholds, thresholdSourceLabel } = await import('./thresholds');
+    expect(formatThresholds({ kind: 'percent', warningPercent: 20, criticalPercent: 5 })).toBe(
+      'Warning ≤ 20 % · Critical ≤ 5 %',
+    );
+    expect(formatThresholds({ kind: 'absolute', warningMs: 300_000, criticalMs: 60_000 })).toBe(
+      'Warning ≤ 05:00 · Critical ≤ 01:00',
+    );
+    expect(thresholdSourceLabel('queue')).toBe('Queue override');
+  });
+});

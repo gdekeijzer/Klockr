@@ -1,7 +1,14 @@
 import type { BoardId, QueueId, QueueItemId, ShowId } from '../ids';
 import { err, ok, type Result } from '../result';
 import type { DurationMs, EpochMs } from '../time';
-import { createTimer, type TimerError, type TimerState } from '../timer';
+import type { Queue, QueueItem } from '../queue';
+import {
+  createTimer,
+  DEFAULT_TIMER_THRESHOLDS,
+  type TimerError,
+  type TimerState,
+  type TimerThresholds,
+} from '../timer';
 
 /** Nominal anonymous retention (docs/IDENTITY_AUTH_LIFECYCLE.md). Expiry = cleanup eligibility. */
 export const ANONYMOUS_SHOW_TTL_MS: DurationMs = 7 * 24 * 60 * 60 * 1_000;
@@ -18,24 +25,8 @@ export interface Show {
   readonly lastActiveAt: EpochMs;
   /** When the anonymous Show becomes eligible for cleanup; not a deletion time. */
   readonly expiresAt: EpochMs;
-}
-
-/** Peer lane of Queue Items. A Quick Timer has exactly one: the Program Queue. */
-export interface Queue {
-  readonly id: QueueId;
-  readonly showId: ShowId;
-  readonly name: string;
-  readonly purpose: 'program';
-  readonly position: number;
-}
-
-/** Universal Queue Item; the timer is an optional capability (ADR-0001). */
-export interface QueueItem {
-  readonly id: QueueItemId;
-  readonly queueId: QueueId;
-  readonly title: string;
-  readonly position: number;
-  readonly timer: TimerState | null;
+  /** Show default warning thresholds (top of Show -> Queue -> Queue Item inheritance). */
+  readonly warning: TimerThresholds;
 }
 
 /** Presentation definition over Show data (ADR-0002). M1 has the Speaker preset only. */
@@ -62,7 +53,7 @@ export interface QuickTimerIds {
 
 /**
  * The smallest expression of the full model: an anonymous Show with one Program Queue, one
- * timed Queue Item and one Speaker Board. No Event, Room or account is involved.
+ * timed (current) Queue Item and one Speaker Board. No Event, Room or account is involved.
  */
 export function createQuickTimerShow(
   ids: QuickTimerIds,
@@ -80,6 +71,7 @@ export function createQuickTimerShow(
       createdAt: now,
       lastActiveAt: now,
       expiresAt: now + ANONYMOUS_SHOW_TTL_MS,
+      warning: DEFAULT_TIMER_THRESHOLDS,
     },
     queue: {
       id: ids.queueId,
@@ -87,13 +79,28 @@ export function createQuickTimerShow(
       name: 'Program',
       purpose: 'program',
       position: 0,
+      // A Quick Timer is immediately operable: its only item is current.
+      currentItemId: ids.queueItemId,
+      warning: null,
+      revision: 0,
     },
     item: {
       id: ids.queueItemId,
       queueId: ids.queueId,
+      groupId: null,
       title: 'Timer',
+      subtitle: null,
+      notes: null,
+      tags: [],
       position: 0,
+      active: true,
+      completedAt: null,
+      startMode: 'manual',
+      warning: null,
       timer: timer.value,
+      createdAt: now,
+      updatedAt: now,
+      revision: 0,
     },
     board: { id: ids.boardId, showId: ids.showId, preset: 'speaker', createdAt: now },
   });

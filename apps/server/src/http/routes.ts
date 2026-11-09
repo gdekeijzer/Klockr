@@ -1,19 +1,24 @@
 import {
   createBoardShare,
   createQuickTimer,
+  executeQueueCommand,
   getBoardState,
   getShowState,
   runShowTimerCommand,
   timerCommandFromDto,
+  toQueueSnapshot,
   toTimerSnapshot,
   type ShowServiceDeps,
 } from '@klockr/application';
 import {
   createQuickTimerRequestSchema,
   idSchema,
+  showCommandSchema,
   timerCommandSchema,
+  queueCommandSchema,
   type BoardShareResponse,
   type CreateQuickTimerResponse,
+  type QueueCommandResponse,
 } from '@klockr/contracts';
 import { ANONYMOUS_SHOW_TTL_MS, BoardId, ShowId } from '@klockr/domain';
 import type { FastifyInstance, FastifyReply } from 'fastify';
@@ -87,19 +92,35 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
     if (!params.success) return badRequest(reply, params.error);
     const owner = await ownerFromRequest(request, params.data.showId, services);
     if (!owner) return reply.code(401).send(unauthenticated);
-    const command = timerCommandSchema.safeParse(request.body);
+    const command = showCommandSchema.safeParse(request.body);
     if (!command.success) return badRequest(reply, command.error);
+    const showId = ShowId(params.data.showId);
+    const context = { actor: owner.actor };
 
-    const result = await runShowTimerCommand(
-      ShowId(params.data.showId),
-      timerCommandFromDto(command.data),
-      { actor: owner.actor },
-      services,
-    );
+    // Timer commands (timer.*) and Queue commands (item.*, group.*, queue.*, show.*) share one
+    // endpoint and envelope; each goes to its own application use case.
+    const timer = timerCommandSchema.safeParse(command.data);
+    if (timer.success) {
+      const result = await runShowTimerCommand(
+        showId,
+        timerCommandFromDto(timer.data),
+        context,
+        services,
+      );
+      if (!result.ok) return reply.code(httpStatusOf(result.error)).send(errorBody(result.error));
+      return {
+        timer: toTimerSnapshot(result.value.queueItemId, result.value.state, services.clock.now()),
+      };
+    }
+    const queueCommand = queueCommandSchema.safeParse(command.data);
+    if (!queueCommand.success) return badRequest(reply, queueCommand.error);
+    const result = await executeQueueCommand(showId, queueCommand.data, context, services);
     if (!result.ok) return reply.code(httpStatusOf(result.error)).send(errorBody(result.error));
-    return {
-      timer: toTimerSnapshot(result.value.queueItemId, result.value.state, services.clock.now()),
+    const response: QueueCommandResponse = {
+      queue: toQueueSnapshot(result.value.aggregate, services.clock.now()),
+      createdId: result.value.createdId,
     };
+    return response;
   });
 
   app.post('/api/v1/shows/:showId/board-shares', async (request, reply) => {

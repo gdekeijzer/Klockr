@@ -96,3 +96,11 @@ Do not treat WebSocket transport events as the domain model itself.
 - **Board during an outage:** keeps rendering from the last snapshot; a small `RECONNECTING` marker appears; no loader or error page after the first sync.
 - **Operator during an outage:** `RECONNECTING` (then `OFFLINE` after 10 s) status chip, a full-width banner, and all controls disabled. The UI never applies a command optimistically; state changes only on server confirmation (HTTP response or realtime event).
 - **Reconnect:** the client is `connected` only after the post-reconnect snapshot arrived; if nothing changed the revision is equal and nothing visibly moves; if the server state differs, the newer revision replaces local state immediately (a real correction).
+
+## Implementation (M2)
+
+- **Rooms:** operators (`show:<id>:operators`), all Boards of a Show (`show:<id>:boards`, timer transitions) and each Board (`board:<id>`, its projection).
+- **Queue changes:** every committed Queue command publishes one `queue.state` (the full Queue projection with derived `nextItemId`, lifecycle, effective thresholds and item timers) to operators and one fresh `board.snapshot` (current item title/subtitle, effective thresholds, current timer) to each Board. Boards therefore follow Current automatically; no polling, no ticks.
+- **Two orderings:** Queue/Board projections are ordered by the Queue `revision` (`queueRevision` on Boards); timers by their own `revision`. Clients drop older messages (`apps/web/lib/live-state.ts`). A Queue snapshot never rolls a timer back to an older revision received earlier; a timer of an item that no longer has a timer in the newest Queue snapshot is ignored (and forgotten, so a re-created timer starting at revision 0 is accepted).
+- **Boards never receive** the Queue, notes, tags or other items.
+- Commands are still HTTP-only; the HTTP response carries the same authoritative Queue (or timer) snapshot and is fed through the same revision gate, so a fast response and the realtime event can arrive in any order.

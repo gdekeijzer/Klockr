@@ -150,3 +150,23 @@ All bodies are validated with `packages/contracts`. Errors use `{ error: { code,
 | GET | `/api/v1/board/state` | `Authorization: Bearer klb_…` (rate-limited) | Board projection |
 
 The web client uses the command id as idempotency key, so retried requests never apply twice.
+
+## Implemented in M2
+
+`POST /api/v1/shows/:showId/commands` (owner cookie) also accepts Queue commands (`packages/contracts/src/queue.ts`). Same envelope (`commandId`, optional `idempotencyKey`, optional `expectedRevision` = Queue revision). Response: `{ queue: QueueSnapshot, createdId }`.
+
+| Command | Capability | Payload |
+| --- | --- | --- |
+| `item.add` | `queue.manage` | `title`, optional `subtitle`, `notes`, `tags`, `durationMs` (null = no timer), `active`, `startMode`, `groupId`, `index` |
+| `item.update` | `queue.manage` | `queueItemId`, `patch` {title, subtitle, notes, tags, startMode, durationMs (null removes the timer)} |
+| `item.delete` / `item.duplicate` | `queue.manage` | `queueItemId` |
+| `item.move` | `queue.manage` | `queueItemId`, `groupId` (null = top level), `index` |
+| `item.setActive` | `queue.manage` | `queueItemId`, `active` |
+| `item.setWarning` | `queue.manage` | `queueItemId`, `warning` (rule or null = reset to inherited) |
+| `group.add` / `group.rename` / `group.delete` / `group.duplicate` / `group.move` | `queue.manage` | `title` / `groupId` (+ `title` / `index`) |
+| `queue.setWarning` | `queue.manage` | `warning` (rule or null = reset to Show default) |
+| `show.setWarning` | `show.manage` | `warning` (rule) |
+| `queue.setCurrent` | `item.control` | `queueItemId` |
+| `item.end` | `item.control` | `queueItemId` (must be current), `next` (false = END, true = END + NEXT) |
+
+Presets (Timer, Speaker, Note, Break) are UI only and all send `item.add`. `GET /api/v1/shows/:showId/state` returns `{ show, board, queue }`; `GET /api/v1/board/state` returns `{ board, queueRevision, current, warning, timer, serverTime }`. Without `expectedRevision` a lost compare-and-set race is re-evaluated against the fresh state (max. 3 attempts); with it, a mismatch is `409 revision_conflict`.

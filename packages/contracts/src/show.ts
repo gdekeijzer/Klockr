@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { epochMsSchema, idSchema } from './common';
+import { epochMsSchema, idSchema, revisionSchema } from './common';
+import { queueSnapshotSchema, thresholdRuleSchema } from './queue';
 import { MAX_DURATION_MS, timerSnapshotSchema } from './timer';
 
 /** POST /api/v1/shows — Anonymous New Show with a Quick Timer. */
@@ -25,7 +26,7 @@ export const boardShareResponseSchema = z.object({
 });
 export type BoardShareResponse = z.infer<typeof boardShareResponseSchema>;
 
-/** Management (Operator) projection of Show State. */
+/** Management (Operator / Queue Editor) projection of Show State. */
 export const showStateSnapshotSchema = z.object({
   show: z.object({
     id: idSchema,
@@ -34,19 +35,25 @@ export const showStateSnapshotSchema = z.object({
     createdAt: epochMsSchema,
     expiresAt: epochMsSchema,
   }),
-  item: z.object({ id: idSchema, title: z.string() }),
   board: z.object({ id: idSchema }),
-  timer: timerSnapshotSchema,
+  /** The Program Queue (M2: the only Queue). */
+  queue: queueSnapshotSchema,
 });
 export type ShowStateSnapshot = z.infer<typeof showStateSnapshotSchema>;
 
 /**
- * Read-only Board projection. Contains only what the Board renders: no Show management data,
- * no credentials, no expiry warnings.
+ * Read-only Speaker Board projection: only the CURRENT item's display data, its effective
+ * thresholds and timer. No queue, notes, tags, management data, credentials or expiry.
+ * Ordered by `queueRevision`; timers additionally by their own revision.
  */
 export const boardStateSnapshotSchema = z.object({
   board: z.object({ id: idSchema, preset: z.enum(['speaker']) }),
-  item: z.object({ title: z.string() }),
-  timer: timerSnapshotSchema,
+  queueRevision: revisionSchema,
+  current: z
+    .object({ id: idSchema, title: z.string(), subtitle: z.string().nullable() })
+    .nullable(),
+  warning: thresholdRuleSchema,
+  timer: timerSnapshotSchema.nullable(),
+  serverTime: epochMsSchema,
 });
 export type BoardStateSnapshot = z.infer<typeof boardStateSnapshotSchema>;

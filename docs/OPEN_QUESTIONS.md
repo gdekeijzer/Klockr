@@ -73,3 +73,10 @@ Remaining:
 31. ~~START after STOP~~ — **Resolved:** START on a stopped timer restarts from the full configured duration (functionally RESTART); previous-run adjustments do not carry over. UI labels the action RESTART in stopped state. See `TIMER_ENGINE.md`.
 32. ~~Adjustment crossing zero~~ — **Resolved:** adjustment may cross zero in both directions (`02:00 +00:30 -> 02:30`, `+00:10 -00:30 -> 00:20`, `+02:14 +00:30 -> +02:44`). Overtime stays derived.
 33. ~~END on idle/stopped timer~~ — **Resolved** by separating Timer from Queue Item END: timer states are `idle | running | paused | stopped`; END / NEXT is a Queue Item / show-control command that may also apply to items without a timer or with a stopped timer. Introduced with Queue Items.
+
+## Raised during M2 (Queue operations) — baseline implemented, confirm in review
+
+34. **Next after a backwards jump.** Baseline: `next` skips completed items, so after re-running an earlier item NEXT continues with the first not-yet-completed item after it (not the item directly after it). Confirm, or prefer strict "the item directly after Current".
+35. **Note items on the Speaker Board.** Baseline: the Board shows the title/subtitle of whatever item is current, also an item without timer (e.g. an operator note made current). Item notes are never shown. Per-audience visibility ("Speaker Board hidden") arrives with Boards/Audiences (M4); until then, should a current item without timer be blanked on Speaker Boards?
+36. **Group collapse state.** Baseline: per browser view state, not persisted or shared between editors. Confirm.
+37. **"On previous END" in M2.** The start mode `on_previous_end` was implemented now because END + NEXT may only start the next timer when configured. M3 keeps the remaining start modes (Scheduled/soft start, External). Confirm naming in the UI ("Start on previous END + NEXT").

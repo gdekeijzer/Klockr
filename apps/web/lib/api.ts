@@ -2,6 +2,8 @@ import type {
   BoardShareResponse,
   CreateQuickTimerResponse,
   ErrorResponse,
+  QueueCommandDto,
+  QueueCommandResponse,
   TimerCommandDto,
   TimerSnapshot,
 } from '@klockr/contracts';
@@ -66,4 +68,23 @@ export async function sendTimerCommand(
     body: JSON.stringify(body),
   });
   return result.timer;
+}
+
+/** Body of a Queue command without the envelope fields the client generates. */
+export type QueueCommandBody = DistributiveOmit<QueueCommandDto, 'commandId' | 'idempotencyKey'>;
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/**
+ * Send a Queue command (item.*, group.*, queue.*, show.*). Same idempotency rule as timers;
+ * the returned Queue is authoritative and revision-gated by the caller.
+ */
+export async function sendQueueCommand(
+  showId: string,
+  command: QueueCommandBody,
+): Promise<QueueCommandResponse> {
+  const commandId = crypto.randomUUID();
+  return request<QueueCommandResponse>(`/shows/${showId}/commands`, {
+    method: 'POST',
+    body: JSON.stringify({ ...command, commandId, idempotencyKey: commandId }),
+  });
 }

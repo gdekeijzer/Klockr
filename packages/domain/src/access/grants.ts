@@ -5,7 +5,15 @@ import type { EpochMs } from '../time';
  * Capabilities. Authorization always checks these, never grant or role names.
  * Grant kinds are bundles of capabilities with a scope (docs/IDENTITY_AUTH_LIFECYCLE.md).
  */
-export type Permission = 'show.read' | 'timer.control' | 'board.share' | 'board.read';
+export type Permission =
+  | 'show.read'
+  | 'show.manage'
+  | 'queue.read'
+  | 'queue.manage'
+  | 'item.control'
+  | 'timer.control'
+  | 'board.share'
+  | 'board.read';
 
 /** Grant families present in M1. Accounts, role links, devices and API tokens come later. */
 export type GrantKind = 'anonymous_owner' | 'board_share';
@@ -23,7 +31,17 @@ export interface AccessGrant {
 
 const BUNDLES: Readonly<Record<GrantKind, readonly Permission[]>> = {
   // Temporary Owner/Master-level management of exactly one anonymous Show.
-  anonymous_owner: ['show.read', 'timer.control', 'board.share'],
+  // show.manage: Show-level settings; queue.manage: structure/content/overrides;
+  // item.control: live Queue operation (current, END / NEXT); timer.control: timer transport.
+  anonymous_owner: [
+    'show.read',
+    'show.manage',
+    'queue.read',
+    'queue.manage',
+    'item.control',
+    'timer.control',
+    'board.share',
+  ],
   // Read-only access to one Board projection. Never mutating.
   board_share: ['board.read'],
 };

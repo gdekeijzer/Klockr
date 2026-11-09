@@ -57,6 +57,7 @@ describe('Quick Timer use cases', () => {
       clock,
       shows: store,
       timers: store,
+      queues: store,
       grants: store,
       locator: store,
       tokens,
@@ -80,7 +81,7 @@ describe('Quick Timer use cases', () => {
       owner: { actor: owner.actor } satisfies CommandContext,
       board: { actor: board.actor } satisfies CommandContext,
       boardGrant: board.grant,
-      itemId: state.value.item.id,
+      itemId: state.value.queue.items[0]?.id ?? '',
       boardId: state.value.board.id,
     };
   }
@@ -143,7 +144,7 @@ describe('Quick Timer use cases', () => {
     it('board can read only its Board projection and can never mutate', async () => {
       const show = await newShow();
       const boardState = await getBoardState(BoardId(show.boardId), show.board, deps);
-      expect(boardState.ok && boardState.value.timer.status).toBe('idle');
+      expect(boardState.ok && boardState.value.timer?.status).toBe('idle');
 
       for (const type of ['timer.start', 'timer.pause', 'timer.stop'] as const) {
         const result = await runShowTimerCommand(
@@ -214,7 +215,9 @@ describe('Quick Timer use cases', () => {
       expect(deriveTimer(restarted.value.state, clock.now()).remainingMs).toBe(2 * MINUTE_MS);
 
       expect(events.events.every((e) => e.showId === ShowId(show.showId))).toBe(true);
-      expect(events.events.map((e) => e.state.revision)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(
+        events.events.map((e) => (e.type === 'timer.transitioned' ? e.state.revision : -1)),
+      ).toEqual([1, 2, 3, 4, 5, 6]);
     });
 
     it('configures the duration while idle or stopped, not while running', async () => {

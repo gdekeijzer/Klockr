@@ -2,7 +2,7 @@
   position: relative;
   min-height: 100vh;
   display: grid;
-  grid-template-rows: auto 1fr auto auto;
+  grid-template-rows: auto auto 1fr auto auto;
   justify-items: center;
   padding: 3vh 4vw;
   background: var(--k-background-canvas);
@@ -29,6 +29,42 @@
   font-weight: 600;
   letter-spacing: 0.14em;
   color: var(--k-state-offline);
+}
+
+.title {
+  display: grid;
+  justify-items: center;
+  gap: 0.4vh;
+  max-width: 92vw;
+  padding-top: 2vh;
+  text-align: center;
+}
+
+.titleMain {
+  font-size: clamp(20px, 4.2vw, 72px);
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--k-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* An item without timer (e.g. a note) is shown by its title only, larger. */
+.title[data-has-timer='false'] .titleMain {
+  font-size: clamp(28px, 7vw, 120px);
+}
+
+.title[data-has-timer='false'] {
+  align-self: center;
+  grid-row: 3;
+}
+
+.titleSub {
+  font-size: clamp(14px, 2.2vw, 36px);
+  color: var(--k-text-secondary);
+}
+
+.noTimer {
+  grid-row: 4;
 }
 
 .digits {
@@ -58,7 +94,7 @@
 
 .message {
   align-self: center;
-  grid-row: 2;
+  grid-row: 3;
   color: var(--k-text-secondary);
   font-size: 20px;
 }

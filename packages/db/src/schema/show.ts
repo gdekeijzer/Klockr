@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   check,
   index,
   integer,
@@ -10,9 +11,20 @@ import {
   text,
   timestamp,
   uuid,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 const tstz = (name: string) => timestamp(name, { withTimezone: true, mode: 'date', precision: 3 });
+
+/** Timer warning threshold rule as JSON: {kind:'percent',...} | {kind:'absolute',...}. */
+export interface ThresholdRuleJson {
+  readonly kind: 'percent' | 'absolute';
+  readonly warningPercent?: number;
+  readonly criticalPercent?: number;
+  readonly warningMs?: number;
+  readonly criticalMs?: number;
+}
+const DEFAULT_RULE = sql`'{"kind":"percent","warningPercent":20,"criticalPercent":5}'::jsonb`;
 
 /** Standalone operational unit. M1: anonymous Quick Timer Shows only. */
 export const shows = pgTable(
@@ -26,6 +38,8 @@ export const shows = pgTable(
     lastActiveAt: tstz('last_active_at').notNull(),
     /** Anonymous cleanup eligibility, not a deletion time. */
     expiresAt: tstz('expires_at').notNull(),
+    /** Show default warning thresholds (top of the inheritance chain). */
+    warningRule: jsonb('warning_rule').$type<ThresholdRuleJson>().notNull().default(DEFAULT_RULE),
   },
   (t) => [
     check('shows_ownership_check', sql`${t.ownership} in ('anonymous')`),
@@ -43,8 +57,33 @@ export const queues = pgTable(
     name: text('name').notNull(),
     purpose: text('purpose').notNull(),
     position: integer('position').notNull(),
+    /** Operational current position; `next` is derived, never stored. */
+    currentItemId: uuid('current_item_id').references((): AnyPgColumn => queueItems.id, {
+      onDelete: 'set null',
+    }),
+    /** Queue override of the Show default; null inherits. */
+    warningRule: jsonb('warning_rule').$type<ThresholdRuleJson>(),
+    /** Compare-and-set guard for the Queue aggregate (structure, current, lifecycle). */
+    revision: integer('revision').notNull().default(0),
   },
   (t) => [index('queues_show_idx').on(t.showId)],
+);
+
+/** Real container of Queue Items within one Queue (one level, no nesting). */
+export const queueGroups = pgTable(
+  'queue_groups',
+  {
+    id: uuid('id').primaryKey(),
+    queueId: uuid('queue_id')
+      .notNull()
+      .references(() => queues.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    /** Position among the Queue's top-level entries (items without group and groups). */
+    position: integer('position').notNull(),
+    createdAt: tstz('created_at').notNull(),
+    updatedAt: tstz('updated_at').notNull(),
+  },
+  (t) => [index('queue_groups_queue_idx').on(t.queueId)],
 );
 
 export const queueItems = pgTable(
@@ -54,10 +93,31 @@ export const queueItems = pgTable(
     queueId: uuid('queue_id')
       .notNull()
       .references(() => queues.id, { onDelete: 'cascade' }),
+    /** Containing Group; null = top level. Deleting a Group deletes its items. */
+    groupId: uuid('group_id').references(() => queueGroups.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
+    subtitle: text('subtitle'),
+    notes: text('notes'),
+    tags: text('tags')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** Position within its container (Group or Queue top level). */
     position: integer('position').notNull(),
+    active: boolean('active').notNull().default(true),
+    completedAt: tstz('completed_at'),
+    startMode: text('start_mode').notNull().default('manual'),
+    /** Item override of the inherited warning thresholds; null inherits. */
+    warningRule: jsonb('warning_rule').$type<ThresholdRuleJson>(),
+    createdAt: tstz('created_at').notNull().defaultNow(),
+    updatedAt: tstz('updated_at').notNull().defaultNow(),
+    revision: integer('revision').notNull().default(0),
   },
-  (t) => [index('queue_items_queue_idx').on(t.queueId)],
+  (t) => [
+    index('queue_items_queue_idx').on(t.queueId),
+    index('queue_items_group_idx').on(t.groupId),
+    check('queue_items_start_mode_check', sql`${t.startMode} in ('manual', 'on_previous_end')`),
+  ],
 );
 
 /**

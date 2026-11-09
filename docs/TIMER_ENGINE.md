@@ -77,7 +77,11 @@ Percentage of the **original configured duration** (adjustments do not move the 
 
 Examples: a 20:00 timer turns warning at 04:00 and critical at 01:00; 05:00 -> 01:00 / 00:15; 01:00 -> 00:12 / 00:03.
 
-Implemented as `DEFAULT_TIMER_THRESHOLDS` / `timerPhase()` in `packages/domain/src/timer/phase.ts`. M2 adds the inheritance `Show default -> Queue override -> Queue Item override`; absolute-time thresholds may be added later.
+Implemented as `DEFAULT_TIMER_THRESHOLDS` / `timerPhase()` in `packages/domain/src/timer/phase.ts`.
+
+### Inheritance and absolute thresholds (M2)
+
+A threshold rule is either `percent` (`warningPercent`, `criticalPercent` of the original configured duration) or `absolute` (`warningMs`, `criticalMs` of remaining time). The effective rule is resolved `Show default -> Queue override -> Queue Item override` (`resolveItemThresholds()` in `packages/domain/src/queue/thresholds.ts`); an override replaces the whole rule (no per-field merging). Every snapshot carries the effective rule **and its source** (`show` / `queue` / `item`) plus the inherited value, so the Operator View and Queue Editor always show where a value comes from and offer **Reset to inherited**. The Show default starts as the KLOCKR default above and can itself be reset to it. With an absolute rule a timer shorter than the warning threshold is in warning from its first running second; an idle timer is always normal.
 
 The UI must show when an item uses an override instead of inherited values.
 
@@ -111,6 +115,14 @@ END / NEXT:
 - may later run end actions, change current/next and optionally start the next item.
 
 END is therefore a Queue Item / show-control command (`EndItem`), introduced together with the Queue Item lifecycle. It is not a transition of the timer state machine.
+
+### END with a live timer (decision 2026-11-09, M2)
+
+`item.end` on an item whose timer is **running or paused** applies the ordinary timer STOP transition as part of the same atomic END: the timer becomes `stopped` with `stoppedAt` = END time, which freezes its value (final elapsed/overtime stays visible). The timer gets no `ended` state. An idle or already stopped timer is left untouched. The item gets `completedAt`.
+
+- `item.end { next: false }` (END): item completed, stays current. Nothing else happens.
+- `item.end { next: true }` (END + NEXT): additionally the derived next item becomes current (or no item at the end of the Queue). Its timer starts **only** when that item's start mode is `on_previous_end` ("On previous END"); the default start mode `manual` never starts anything. The Operator View announces this on the END + NEXT button and with an AUTO-START marker on the Next card.
+- `queueItemId` must be the current item, so a double click or a stale view can never END a second item.
 
 ### START after STOP (decision 2026-11-09)
 
