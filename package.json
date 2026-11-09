@@ -1,0 +1,38 @@
+{
+  "name": "klockr",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "db:up": "node scripts/compose.mjs up -d --wait",
+    "db:down": "node scripts/compose.mjs down",
+    "db:generate": "pnpm --filter @klockr/db generate",
+    "db:migrate": "pnpm --filter @klockr/db migrate",
+    "test:integration": "pnpm --filter @klockr/db test:integration"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@klockr/config": "workspace:*",
+    "@next/eslint-plugin-next": "16.4.5",
+    "@types/node": "24.19.2",
+    "eslint": "10.14.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.14.0",
+    "prettier": "3.9.10",
+    "turbo": "2.11.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.1.0"
+  }
+}

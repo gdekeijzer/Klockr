@@ -1,0 +1,9 @@
+@import '@klockr/ui/tokens.css';
+
+html,
+body {
+  margin: 0;
+  background: var(--k-bg-canvas);
+  color: var(--k-text-primary);
+  font-family: system-ui, sans-serif;
+}

@@ -1,0 +1,443 @@
+{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0 Calibri;}{\f1 Courier New;}}{\colortbl;\red20\green20\blue20;\red75\green75\blue75;\red230\green230\blue230;}\viewkind4\uc1\pard\fi0\li0\sb120\sa140\f0\fs36\b Functioneel Ontwerp - StageTimer / Show Control applicatie\b0\par
+\pard\fi0\li0\sb0\sa30\f0\fs22 Versie: 0.2\par
+\pard\fi0\li0\sb0\sa260\f0\fs22 Status: bijgewerkt na functionele review\par
+\pard\sa220\brdrb\brdrs\brdrw10\brsp20\par
+\pard\fi0\li0\sb0\sa260\f0\fs22 Dit document beschrijft de functionele opzet en het gedrag van de applicatie. Technische implementatiekeuzes, databaseontwerp, frameworks en concrete API-endpoints vallen buiten deze versie.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 1. Productvisie\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De applicatie is in de kern een StageTimer die een volledige show kan begrijpen, niet een uitgebreid eventmanagementsysteem waar toevallig een timer in zit.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De belangrijkste ontwerpgedachte is:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 "Eenvoud als uitgangspunt, complexiteit alleen wanneer de gebruiker die nodig heeft."\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een nieuwe gebruiker moet binnen enkele seconden een timer kunnen starten zonder account, configuratiewizard, Event, Room of andere voorbereiding.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Dezelfde eenvoudige timer moet vervolgens kunnen doorgroeien naar een volledige show met een queue, meerdere outputs, meerdere disciplines, meerdere ruimtes en uiteindelijk een compleet evenement.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarmee kent het product grofweg een natuurlijke groeilijn:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Timer\line   -> Queue\line   -> Show\line   -> Multi-queue Show\line   -> Event\line   -> Multi-room Event\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Dit zijn nadrukkelijk geen verschillende producten of modi. Het zijn verschillende niveaus waarop dezelfde onderliggende functionaliteit wordt gebruikt.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een belangrijk principe daarbij is:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 "Complexiteit is opt-in."\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een gebruiker die alleen een countdown nodig heeft, hoeft nooit te weten dat Events, parallelle queues, audiences, devices of Actions bestaan.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 2. Kernprincipes\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Data en presentatie zijn volledig gescheiden.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Queue Item bevat informatie en status. Een Board bepaalt welke informatie wordt weergegeven en hoe die wordt weergegeven.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een timer is dus niet gekoppeld aan \'e9\'e9n bepaald stage-scherm.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Dezelfde data kan bijvoorbeeld gelijktijdig worden weergegeven als:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Speaker Board\line 12:43\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Stage Manager Board\line JAN JANSEN\line 12:43\line NEXT: PANEL\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 FOH Board\line CURRENT: Keynote\line 12:43\line SHOW +04:12 BEHIND\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Public Board\line Keynote\line Jan Jansen\line 10:00 - 10:30\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De software informeert; de operator beslist.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De applicatie mag rekenen, voorspellen, afwijkingen tonen en voorstellen doen. Tijdens een productie worden echter geen ingrijpende wijzigingen stilzwijgend doorgevoerd.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De datastructuur blijft zo vlak mogelijk.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Er wordt bewust voorkomen dat de gebruiker structuren krijgt als:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Event\line   -> Room\line     -> Show\line       -> Session\line         -> Cue\line           -> Timer\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De kracht moet vooral uit Queue Items, properties, relaties en verschillende Views komen.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 3. Hoofdstructuur\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De functionele hoofdstructuur wordt:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Event              optional\line |\line +-- Room / Area    optional\line |\line +-- Show\line     |\line     +-- Queue\line     |   +-- Group\line     |   |   +-- Queue Item\line     |   +-- Queue Item\line     |\line     +-- Queue\line     +-- Queue\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarnaast bestaan onder andere:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Boards\line Devices\line Users\line Audiences\line Actions\line Messages\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Deze onderdelen maken gebruik van de informatie in de Show, maar vormen geen extra verplichte lagen in de programmatische structuur.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 4. Quick Timer en New Show\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De laagste instap moet extreem eenvoudig zijn.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Op de homepage moet een gebruiker bijvoorbeeld direct kunnen kiezen voor:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 New Timer\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarna kan onmiddellijk een countdown worden ingevoerd:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 05:00\line START\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Er is hiervoor geen account nodig.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Onder water ontstaat hierbij reeds een minimale Show met een Queue en Queue Item, maar de gebruiker hoeft hiervan niets te merken.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Wanneer de gebruiker meer nodig heeft kan diezelfde timer worden uitgebreid:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 05:00\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 wordt bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Spreker Jan      05:00\line Pauze            10:00\line Spreker Marie    20:00\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarna kunnen eventueel Boards, Rooms, Events en andere functionaliteit worden toegevoegd.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 5. Event\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Event is een optionele container voor grotere producties.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Voorbeelden:\line - congres\line - beurs\line - festival\line - corporate event\line - conferentie met meerdere ruimtes\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Event kan meerdere Shows bevatten.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een gebruiker die alleen een StageTimer nodig heeft hoeft nooit een Event aan te maken.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Een Event biedt onder andere een centrale plek voor:\line - Shows\line - Rooms/Areas\line - Boards\line - Devices\line - gebruikers\line - algemene statusinformatie\line - centrale monitoring\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 6. Room / Area\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Rooms en Areas zijn eveneens optioneel.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Room kan bijvoorbeeld zijn:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Main Stage\line Workshop Room A\line Workshop Room B\line Foyer\line Backstage\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Show kan aan \'e9\'e9n Room/Area tegelijk gekoppeld zijn.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Wanneer dezelfde Show-inhoud in een andere Room gebruikt moet worden, wordt deze gedupliceerd. Hierdoor kunnen beide exemplaren daarna onafhankelijk worden aangepast.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Dit is belangrijk voor de praktijk waarin last-minute wijzigingen per ruimte vrijwel onvermijdelijk zijn.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Room kan gedurende een Event meerdere Shows bevatten, bijvoorbeeld een ochtend- en avondprogramma.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 7. Show\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De Show is het belangrijkste zelfstandige object van de applicatie.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Een Show kan bestaan:\line - zonder Event\line - zonder Room\line - gekoppeld aan een Event\line - gekoppeld aan een Room binnen een Event\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De Show bevat \'e9\'e9n of meerdere Queues.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een eenvoudige Show heeft bijvoorbeeld alleen:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Program\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een complexere productie kan hebben:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Program\line Stage Management\line Audio\line Lighting\line Video\line Broadcast\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 De Show bevat ook algemene defaults, bijvoorbeeld voor:\line - timerwaarschuwingen\line - timinggedrag\line - kleuren\line - visibility\line - gedrag bij timer-einde\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Queues en individuele Queue Items mogen deze defaults overrulen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Het algemene overervingsmodel wordt daarmee:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Show defaults\line     -> Queue settings\line         -> Queue Item override\par
+\pard\fi0\li0\sb80\sa70\f0\fs24\b Zichtbaarheid van overerving en overrides\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Voor iedere overerfbare instelling moet in Master en, waar operationeel relevant, in de Operator View zichtbaar zijn waar de actuele waarde vandaan komt: Show default, Queue setting of Queue Item override.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Warning settings: Item override\line Source: Queue Item\line Reset to Queue default\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een override krijgt een compact visueel kenmerk, bijvoorbeeld een override-icoon of label. Dit principe geldt generiek voor alle instellingen die volgens het Show -> Queue -> Queue Item-model kunnen worden overruled, niet alleen voor timer warning states.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 8. Queue\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Queue is een geordende lijst van items.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 De primaire Program Queue is in veel situaties feitelijk zowel:\line - de rundown\line - de cue-list\line - de agenda\line - de bron voor stage timing\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Er bestaat daarom geen aparte Agenda-database of apart agenda-object.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een agenda is gewoon een Board/View die bepaalde beschikbare data selecteert en presenteert.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Source:\line Event A\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Filter:\line Room = Main Stage\line Queue = Program\line Visibility = Public\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 kan een programma-overzicht opleveren.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Maar een Board mag net zo goed data uit Show B tonen terwijl het fysiek in Room A staat.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De data moet zo vrij mogelijk bruikbaar zijn.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 9. Parallelle Queues\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Show mag meerdere Queues naast elkaar bevatten.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 PROGRAM\line 10:00 Keynote Jan\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 STAGE\line 09:55 Jan backstage\line 09:58 Stand-by Jan\line 10:00 GO Jan\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 AUDIO\line 09:58 Check headset\line 09:59 Headset LIVE\line 10:00 Walk-in fade\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 LIGHT\line 09:59 Stand-by keynote\line 10:00 GO keynote look\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Deze Queues zijn peers.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Audio is dus niet een subqueue van de keynote en Stage Management is geen child van de Program Queue.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarmee blijft het model vlak en overzichtelijk.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Relaties tussen Queues\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Queue Items mogen optioneel gekoppeld worden aan items uit een andere Queue.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Program:\line Keynote Jan       10:00\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Audio:\line Headset LIVE      -01:00 relative to Keynote Jan\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Wanneer de keynote naar 10:05 wordt verschoven, kan het gekoppelde Audio-item automatisch naar 10:04 verschuiven.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Deze koppeling kan worden verbroken.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Hierdoor ontstaat synchronisatie tussen disciplines zonder ingewikkelde parent-childstructuren.\par
+\pard\fi0\li0\sb80\sa70\f0\fs24\b Live wijzigingen en gekoppelde planning\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een wijziging aan een actieve timer, bijvoorbeeld +05:00, verandert direct de actuele timing state van de Show. Of en hoe toekomstige geplande Queue Items daardoor verschuiven, wordt bepaald door de timing mode en eventuele operatoractie.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Bij Strict / Operator Controlled blijven de geplande tijden het referentiepunt en wordt de afwijking zichtbaar als ahead/behind. Bij Sliding mag de planning meeverschuiven, maar gekoppelde Queues mogen niet zonder visuele context abrupt over het scherm herschikken.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De interface moet live verschuivingen rustig en voorspelbaar tonen. Gewijzigde of nog te verwerken items kunnen tijdelijk worden gemarkeerd, bijvoorbeeld als SHIFT PENDING of UPDATED +05:00. De gebruiker moet kunnen zien welke gekoppelde items geraakt worden.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Wanneer een planningverschuiving wordt toegepast, behouden relationeel gekoppelde items standaard hun relatieve offset. De koppeling kan bewust worden verbroken.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 10. Queue Item\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De Queue Item is de universele bouwsteen van een Queue.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Er komen functioneel geen volledig verschillende objecttypen voor Timer, Note, Break, Speaker enzovoort.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 In plaats daarvan bestaat \'e9\'e9n basisobject met optionele eigenschappen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Conceptueel kan een Queue Item bijvoorbeeld bevatten:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Title\line Subtitle\line Description\line Scheduled start\line Scheduled end\line Duration\line Timer\line Speaker / presenter metadata\line Notes\line Tags\line Visibility\line Audience\line Start behaviour\line End behaviour\line Relations\line Actions\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Niet ieder item gebruikt al deze eigenschappen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Presets\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Hoewel de onderliggende structuur gelijk blijft, mag de interface wel presets aanbieden zoals:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Add Timer\line Add Speaker\line Add Note\line Add Break\line Add Cue\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Speaker is daarmee geen speciaal databaseobject maar een handige preset voor een Queue Item.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Dit houdt het product eenvoudig terwijl de interface wel betekenisvol blijft.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 11. Notes\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Notes kunnen op twee manieren voorkomen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Queue Item kan interne notes bevatten:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 SPREKER JAN\line Headset 3\line Water op katheder\line PPT vanaf eigen laptop\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarnaast kan een los Queue Item puur een note zijn:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 LET OP:\line CEO ARRIVEERT VIA STAGE LEFT\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Net als andere data kan worden bepaald voor welke gebruikers, Boards of audiences een note zichtbaar is.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een zendertechnicus hoeft daardoor niet noodzakelijk dezelfde notes te zien als een Stage Manager.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 12. Groups / Sections\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Queue kan Groups bevatten.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Group is een echte container en niet alleen een visuele divider.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Ochtendprogramma\line   Opening\line   Spreker 1\line   Spreker 2\line   Panel\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Middagprogramma\line   Opening\line   Keynote\line   Q&A\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Een Group kan worden:\line - ingeklapt\line - geopend\line - versleept\line - gedupliceerd\line - in zijn geheel naar een andere Queue verplaatst\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De child-items verhuizen daarbij mee.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 13. Tags en properties\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Tags worden alleen gebruikt voor vrije classificatie en filtering.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Voorbeelden:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 #keynote\line #vip\line #broadcast\line #sponsor\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Functioneel gedrag wordt niet in tags verstopt.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Dus niet:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 #no-screen\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 maar bijvoorbeeld een echte visibility-instelling:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Speaker Board      hidden\line FOH                visible\line Stage Manager      visible\line Public             hidden\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarmee blijven tags en functionele eigenschappen duidelijk gescheiden.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 14. Timer\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Timer is een optionele eigenschap van een Queue Item.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Wanneer een Queue Item een duration/timer heeft wordt het automatisch een timed item.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een typische spreker kan bijvoorbeeld zijn:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Spreker Jan\line 20:00\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 De timer ondersteunt minimaal:\line - countdown\line - count-up/overtime\line - start\line - pause/resume\line - stop\line - end/next\line - tijd toevoegen\line - tijd aftrekken\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De interface moet clean maar compleet blijven.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Bijvoorbeeld:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 -30   -10    PAUSE    +10   +30\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 met overige showbediening logisch gegroepeerd.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 15. Timer warning states\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Timers ondersteunen visuele fases.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Normal      groen\line Warning     oranje\line Critical    rood\line Overtime    rood\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Thresholds worden standaard per Show of Queue ingesteld.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een individueel Queue Item mag deze overrulen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Thresholds mogen zowel op absolute tijd als percentage gebaseerd kunnen worden.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Voorbeelden:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Warning at 05:00 remaining\line Critical at 01:00 remaining\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 of:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Warning at 20%\line Critical at 5%\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Overtime kan extra gedrag hebben zoals:\line - rood\line - knipperen\line - eventueel later sneller knipperen\line - optionele chime\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Knipperen is configureerbaar en nooit verplicht.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 16. Overtime\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Wanneer een countdown nul bereikt kan deze doorlopen:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 00:02\line 00:01\line 00:00\line +00:01\line +00:02\line +00:03\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Overtime is geen aparte timer maar een toestand van dezelfde timer.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Wanneer tijdens overtime tijd wordt toegevoegd, wordt de timerwaarde letterlijk aangepast.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De operator houdt volledige controle.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 17. Meerdere gelijktijdige timers\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Show heeft conceptueel \'e9\'e9n duidelijk Current Queue Item per relevante operationele context, maar technisch mogen meerdere timers tegelijk lopen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 CURRENT\line Keynote                  18:42\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 RUNNING TIMERS\line Speaker timer            18:42\line Next speaker call         3:42\line Session elapsed          +11:18\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Het wisselen van Current hoeft andere timers dus niet automatisch te stoppen.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 18. Start Modes\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Queue Item met timer kan verschillende startwijzen ondersteunen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Minimaal:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Manual\line Scheduled\line On previous END\line External\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De Start Mode wordt per item configureerbaar.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Show/Queue-presets mogen defaults leveren.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Manual\line De operator bepaalt exact wanneer de timer begint.\line Een geplande tijd is hierbij informatief.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Scheduled\line De timer heeft een geplande starttijd.\line Standaard wordt gewerkt met soft scheduled start.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Wanneer bijvoorbeeld om 10:45 een timer zou moeten starten terwijl een vorige spreker nog actief is, toont het systeem:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 SHOULD HAVE STARTED 03:12 AGO\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 maar start niet zonder operatoringreep.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Ook andere varianten mogen configureerbaar zijn, waaronder een harde automatische start.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Previous END\line Het item start wanneer een eerder Queue Item met END wordt afgesloten.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 External\line Een externe trigger kan dezelfde interne startactie uitvoeren als een gebruiker.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 19. Stop versus End\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 STOP en END zijn verschillende acties.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 STOP\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 STOP betekent:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 stop deze timer.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Hierbij worden geen automatisch gekoppelde vervolgacties uitgevoerd.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 END / NEXT\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 END betekent:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 dit Queue Item is operationeel afgerond.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarna kunnen onder andere plaatsvinden:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 mark item complete\line run end actions\line select next item\line optionally start next\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Hierdoor kan de operator altijd veilig stoppen zonder onbedoeld de rest van de show te triggeren.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 20. Timing Modes\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Shows en/of Queues kennen een timingstrategie.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Sliding / Free\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Uitloop verschuift het programma.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 10:00 Spreker A\line 10:20 Spreker B\line 10:40 Pauze\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 A krijgt vijf minuten extra:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 10:00 Spreker A\line 10:25 Spreker B\line 10:45 Pauze\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De oorspronkelijke durations blijven intact.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Strict / Operator Controlled\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De oorspronkelijke planning blijft het referentiepunt.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Wanneer de show vijf minuten achterloopt toont de applicatie bijvoorbeeld:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 +05:00 BEHIND SCHEDULE\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De applicatie verkort geen timers automatisch.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De operator bepaalt waar en hoe tijd wordt teruggewonnen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Dit is de standaard veiligheidsfilosofie.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Automatic Recovery\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Kan later worden toegevoegd.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De software kan dan voorstellen doen of eventueel volgens expliciete configuratie tijd verdelen over resterende items.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Dit is geen standaard V1-gedrag.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 21. Fixed Time Anchors\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Queue Items kunnen als tijdsanker worden vastgezet.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 10:00 Opening\line 10:20 Spreker A\line 10:40 Spreker B\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 11:00 Pauze        FIXED\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 11:30 Keynote\line 13:00 Lunch        FIXED\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Het systeem kan aangeven:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 +05:18 BEHIND\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Next fixed point:\line PAUZE 11:00\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Recovery required:\line 05:18\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De operator bepaalt vervolgens wat ermee gebeurt.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 22. On-time / ahead / behind\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De applicatie houdt continu rekening met geplande en daadwerkelijke voortgang.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Status kan bijvoorbeeld zijn:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 ON TIME\line +03:14 BEHIND\line -01:42 AHEAD\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Deze status kan worden gebruikt in:\line - Operator View\line - Master View\line - Event Dashboard\line - specifieke Boards\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 23. Master View\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De Master View is de uitgebreide beheeromgeving voor een productie.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Master mag zowel plannen als live handelen.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Hier kunnen onder andere:\line - Events worden beheerd\line - Shows worden verplaatst\line - Queues worden aangepast\line - Groups en Items worden versleept\line - Rooms worden gewijzigd\line - items worden gedupliceerd\line - locks worden beheerd\line - Boards en Devices worden gekoppeld\line - timers eventueel direct worden gestart of aangepast\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De Master View mag een uitklapbare boomweergave bieden:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Event\line   Main Stage\line     Main Show\line       Program\line       Stage\line       Audio\line       Lighting\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3   Room A\line     Workshop Show\line       Program\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Drag-and-drop is een fundamentele producteigenschap.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 24. Operator View\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De Operator View heeft juist minder mogelijkheden.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De operator moet operaten, niet administreren.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 De interface concentreert zich op:\line - Current\line - Next\line - timers\line - running timers\line - start/pause/stop\line - END/NEXT\line - tijd aanpassen\line - messages\line - ahead/behind\line - noodzakelijke waarschuwingen\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Structurele wijzigingen worden zoveel mogelijk uit deze interface gehouden.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 25. Locks\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Structuren kunnen worden gelockt om ongewenste wijzigingen tijdens een productie te voorkomen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Locks kunnen worden toegepast op bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Event\line Room\line Show\line Queue\line Group\line Queue Item\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Afhankelijk van permissions kan een gebruiker een lock negeren of verwijderen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Wanneer een gekoppeld Queue Item wordt verplaatst kan de applicatie bijvoorbeeld vragen:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 "Dit item heeft 6 gekoppelde items in andere Queues. Meeverplaatsen?"\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Hierdoor blijft flexibiliteit beschikbaar zonder veiligheid op te offeren.\par
+\pard\fi0\li0\sb80\sa70\f0\fs24\b Unlock en nood-override\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een lock mag in een live situatie niet leiden tot een operationele blokkade wanneer de bevoegde Master tijdelijk niet beschikbaar is. Daarom ondersteunt het functionele model naast normaal unlocken ook een Request Unlock-flow en, indien de rol dit toestaat, een Emergency Override.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Locked by Master\line Request unlock\line Emergency override (permission required)\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Emergency Override vereist expliciete bevestiging en wordt gelogd met gebruiker, tijdstip en het object waarop de lock is doorbroken. Rollen en permissions bepalen wie deze mogelijkheid heeft.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 26. Boards\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Boards zijn de output- en informatielaag van de applicatie.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Board is nadrukkelijk niet automatisch een fysiek scherm.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Het is een configuratie die bepaalt:\line - welke data wordt gebruikt\line - welke data wordt gefilterd\line - wat zichtbaar is\line - hoe dit wordt weergegeven\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Voorbeelden:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Speaker Confidence\line Stage Manager\line FOH\line Backstage\line Room Agenda\line Central Agenda\line Public Signage\line Production Overview\line Custom Board\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 27. Board presets en customization\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Boards worden aangeboden met goede presets.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een gebruiker kan daardoor snel bijvoorbeeld kiezen:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Add Speaker Board\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 zonder een leeg canvas te hoeven ontwerpen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Board kan vervolgens worden aangepast.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Elementen kunnen bijvoorbeeld zijn:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Timer\line Current title\line Speaker\line Subtitle\line Next item\line Clock\line Message\line Progress bar\line Show offset\line Running timers\line Logo\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Voor V1 hoeft nog geen volledig pixelvrij grafisch designsysteem beschikbaar te zijn.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een preset-based configuratie moet echter voldoende professioneel aanpasbaar zijn. Minimaal moeten zichtbare componenten, volgorde of positie binnen een begrensde layout, typografie en grootte, labels, logo/achtergrond, timer appearance, progress indicator en data source/filtering configureerbaar zijn.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarmee zijn de V1-presets geen starre ontwerpen, maar veilige en snel inzetbare basislayouts.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een geavanceerde vrije Board Designer kan later volgen.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 28. Data source van Boards\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Boards zijn niet hard gekoppeld aan \'e9\'e9n agenda of Queue.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Een Board kan data halen uit:\line - \'e9\'e9n Show\line - \'e9\'e9n Queue\line - \'e9\'e9n Room\line - meerdere Queues\line - een Event\line - gefilterde subsets hiervan\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarmee kan bijvoorbeeld een centraal hal-scherm een samengestelde agenda van drie Rooms tonen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Of een backstage-scherm alleen informatie uit de Stage Queue.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 29. Audiences / destinations\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Boards kunnen worden gegroepeerd in audiences.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Stage\line Production\line Backstage\line Public\line Broadcast\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Board kan lid zijn van meerdere audiences.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Data en messages kunnen daarna worden gericht op \'e9\'e9n of meer audiences zonder ieder individueel Board te hoeven selecteren.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 30. Messages\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Ad-hoc messages zijn nadrukkelijk verschillend van normale Queue Items.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een noodbericht zoals:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 AFRONDEN\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 of:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 STOP NU\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 kan direct naar geselecteerde Boards/audiences worden gestuurd.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Een dergelijk bericht kan:\line - onmiddellijk verschijnen\line - handmatig worden verwijderd\line - eventueel automatisch verdwijnen na een ingestelde tijd\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Normale geplande tekst die inhoudelijk bij de show hoort wordt gewoon als Queue Item of Note opgenomen.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 31. Event Dashboard\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Event krijgt een centrale overview.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Hier kan bijvoorbeeld worden weergegeven:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 MAIN STAGE\line LIVE\line Keynote Jan\line +03:18 BEHIND\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 ROOM A\line LIVE\line Workshop A\line ON TIME\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 ROOM B\line NEXT\line Panel\line 14:30\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Daarnaast kan het Dashboard status tonen van:\line - Boards\line - Devices\line - Shows\line - Queues\line - actieve timers\line - timingafwijkingen\line - verbindingen\line - waarschuwingen\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Het Event Dashboard is daarmee de globale productiemonitor.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 32. Anonymous Shows\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een gebruiker hoeft geen account aan te maken om te beginnen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een nieuwe anonieme Show wordt direct aangemaakt.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De gebruiker krijgt automatisch toegang tot de Show en kan meteen een Timer/Queue gebruiken.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een niet-geclaimde Show blijft standaard 7 dagen bestaan.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarna mag deze automatisch worden verwijderd.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een gebruiker kan de Show gedurende die periode aan een account koppelen.\par
+\pard\fi0\li0\sb80\sa70\f0\fs24\b Verloopwaarschuwingen en veilige cleanup\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Het verlopen van een Anonymous Show mag nooit als verrassing komen. In beheerinterfaces zoals Master wordt ruim voor het verlopen duidelijk getoond hoeveel tijd resteert en wordt een duidelijke Claim Show-actie aangeboden.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Anonymous Show\line Expires in 1d 18h\line Claim Show\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Operationele Boards, zoals een Speaker Board, worden niet verstoord met administratieve waarschuwingen zolang dit niet noodzakelijk is voor de productie.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Show die actief in gebruik is op het moment dat de bewaartermijn afloopt, wordt niet midden in de productie verwijderd. Verwijdering vindt pas plaats via een veilige cleanup nadat de Show niet meer actief is.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 33. Accounts en Show claiming\b0\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Een account is vooral bedoeld voor gebruikers die:\line - Shows vooraf willen voorbereiden\line - templates willen bewaren\line - Shows later opnieuw willen gebruiken\line - meerdere producties beheren\line - Devices beheren\line - samenwerken met anderen\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een anonieme Show kan later worden geclaimd door een account.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De eenvoudige instap blijft daarmee intact.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 34. Rollen en rechten\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Rollen mogen niet hardcoded in de functionele logica worden ingebakken.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Het systeem wordt gebaseerd op permissions, waarbij rollen bundels van permissions zijn.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Initi\'eble rollen kunnen zijn:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Owner / Admin\line Master\line Operator\line Viewer\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Later kunnen zonder fundamentele wijzigingen rollen worden toegevoegd zoals:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Stage Manager\line Producer\line Technical Director\line Contributor\line Guest Editor\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Board-toegang staat los van gebruikersrechten.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een Speaker Board heeft bijvoorbeeld geen Operator-account nodig.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 35. Sharing\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Sharing kan zowel centraal als vanaf een individueel Board.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Centraal kan een gebruiker bijvoorbeeld zien:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Speaker Board      Share\line Stage Manager      Share\line Public Agenda      Share\line Operator           Invite\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Per Board is eveneens direct beschikbaar:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Share\line QR\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Share-links kunnen later eigenschappen ondersteunen zoals:\line - intrekken\line - regenereren\line - expiration\line - PIN\line - read-only toegang\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De rechten worden niet uitsluitend bepaald door het leesbare URL-pad maar door veilige toegangsinformatie.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 36. Devices\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Devices worden als echte objecten beheerd.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Na eerste koppeling krijgt een Device een uniek ID.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Voorbeelden:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Room A Tablet\line Main Stage Confidence\line Foyer Screen 1\line FOH Laptop\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Device Management ondersteunt minimaal:\line - naam\line - uniek ID\line - online/offline status\line - laatst gezien\line - toegewezen Board\line - gekoppelde Show/Event\line - opnieuw toewijzen\line - verwijderen\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 37. Device pairing\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Er komen minimaal twee manieren om een Device te koppelen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Direct link / QR\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Geschikt voor tijdelijke outputs.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Gebruiker scant QR of opent een unieke URL.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Device code\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Geschikt voor vaste installaties.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Het Device opent bijvoorbeeld de device-pagina en krijgt een korte code:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 482 716\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 In Master selecteert de gebruiker deze code en koppelt het Device vervolgens aan een Board.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Daarna blijft het Device bekend en kan het later eenvoudig opnieuw worden toegewezen.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 38. Realtime gedrag\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Alle relevante Views en Boards moeten dezelfde actuele showstatus zien.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Wanneer bijvoorbeeld de Operator een timer start:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Operator\line   -> Show state\line       -> Speaker Board\line       -> Stage Manager\line       -> FOH\line       -> Event Dashboard\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 moeten de relevante schermen direct worden bijgewerkt.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De Show heeft dus \'e9\'e9n gedeelde actuele state waarop verschillende clients zich abonneren.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De technische implementatie hiervan wordt pas in het technische ontwerp bepaald.\par
+\pard\fi0\li0\sb80\sa70\f0\fs24\b Offline robuustheid\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een reeds geopend Board moet een korte netwerkonderbreking kunnen doorstaan zonder zijn bruikbare output te verliezen. Een lopende timer blijft op basis van de laatst bekende state lokaal zichtbaar doorlopen; het Board mag niet vervangen worden door een laadscherm of foutpagina.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Waar relevant wordt een subtiele status zoals OFFLINE / RECONNECTING getoond. Op publieks- of Speaker Boards is deze melding zo terughoudend mogelijk; op Operator, Master en monitoring-views moet de verbindingsstatus duidelijk zichtbaar zijn.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Tijdens een disconnect mag een client geen succesvolle centrale bediening suggereren wanneer de authoritative Show State niet bereikbaar is. De interface maakt duidelijk onderscheid tussen lokaal weergegeven state en acties die centrale bevestiging vereisen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Na reconnect synchroniseert de client opnieuw met de authoritative Show State. Eventuele afwijkingen worden gecontroleerd gecorrigeerd, zodat timers of layouts niet onnodig abrupt verspringen.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 39. Integraties\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De applicatie wordt functioneel voorbereid op integraties.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Belangrijk uitgangspunt:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 "Een integratie is niet onderdeel van de Timer-engine zelf."\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Externe systemen mogen timers bedienen en door de applicatie aangestuurd worden, maar een storing in een integratie mag de kernfunctionaliteit nooit onbruikbaar maken.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 40. Externe besturing\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Integraties moeten uiteindelijk acties kunnen uitvoeren zoals:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Start timer\line Pause timer\line Stop timer\line GO item\line END item\line Next\line Previous\line Set current\line Add time\line Send message\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een externe START gebruikt dezelfde interne functionaliteit als wanneer de Operator op START drukt.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 41. Actions\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Queue Items kunnen later Actions krijgen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Deze Actions kunnen reageren op events zoals:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 On start\line On pause\line On resume\line On warning\line On critical\line On overtime\line On end\line On manual GO\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Per event kunnen meerdere Actions bestaan.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Mogelijke transports zijn later onder andere:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 OSC\line HTTP\line Webhook\line Companion\line QLab\line MIDI\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 42. Integratiefouten\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Integraties zijn standaard non-blocking.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Wanneer een externe Action mislukt:\line - de Show blijft draaien\line - de Timer blijft lopen\line - de Action krijgt een failed-status\line - Operator krijgt een geschikte waarschuwing\line - Master kan meer detail bekijken\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Retry-mechanismen kunnen later worden toegevoegd.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Een integratie mag alleen blocking gedrag krijgen wanneer dit expliciet wordt geconfigureerd.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 43. Feedback naar externe systemen\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Integraties zijn uiteindelijk bidirectioneel.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Niet alleen:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Companion -> START TIMER\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 maar ook:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Timer started -> Companion feedback\line Timer warning -> button state\line Overtime -> red feedback\line Current changed -> new label\line Show behind -> status feedback\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Hierdoor kunnen externe bedieningspanelen daadwerkelijk onderdeel worden van de showworkflow.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 44. Local Agent\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Voor protocollen die vanuit een cloud-webapp niet rechtstreeks beschikbaar zijn, zoals lokale OSC/UDP, komt later een optionele Local Agent.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Conceptueel:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Cloud application\line     <->\line Local Agent\line     <->\line OSC / MIDI / local HTTP / QLab / Companion\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De Local Agent kan later als Device-achtig object worden beheerd.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Eigenschappen zijn bijvoorbeeld:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Name\line ID\line Online/offline\line Assigned Event/Show\line Enabled protocols\line Logs\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De Local Agent is niet noodzakelijk voor normaal gebruik van het product.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 45. Admin Portal\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Er komt uiteindelijk een aparte beheeromgeving voor productadministratie.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Dit is iets anders dan Master binnen een productie.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 De Admin Portal is bedoeld voor bijvoorbeeld:\line - users\line - accounts\line - anonymous Shows\line - verlopen Shows\line - Devices\line - systeemstatus\line - misbruik\line - cleanup\line - eventuele abonnementen/licenties\line - supportfunctionaliteit\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De precieze invulling wordt later ontworpen.\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De onderliggende architectuur moet wel vanaf het begin rekening houden met deze beheerlaag.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 46. MVP / versie 1\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De eerste werkelijk bruikbare versie moet meer zijn dan alleen een countdown, maar hoeft nog niet alle toekomstige showcontrol-integraties te bevatten.\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Voor V1 beschouwen we voorlopig als kern:\line - direct Anonymous New Show\line - simpele Quick Timer\line - accounts en Show claiming\line - Show + Queue\line - universele Queue Items\line - Timer-property\line - Notes\line - Groups\line - tags en visibility\line - parallelle Queues\line - relaties tussen Queue Items\line - timer warning states\line - overtime\line - manual/scheduled/previous/external-ready startmodellen\line - STOP versus END/NEXT\line - meerdere running timers\line - Current / Next\line - Sliding en Strict timing\line - fixed anchors\line - ahead/on-time/behind\line - Master View\line - Operator View\line - realtime synchronisatie\line - Board presets\line - configureerbare Board-content\line - audiences\line - ad-hoc messages\line - QR/share\line - basis Device Management\line - Event\line - optionele Rooms/Areas\line - drag-and-drop\line - duplication\line - locks\line - Event Dashboard\line - uitbreidbaar rollen- en permissionsmodel\line - basis externe API\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 Niet noodzakelijk voor V1:\line - OSC\line - Bitfocus Companion integration\line - QLab integration\line - Local Agent\line - MIDI\line - advanced action engine\line - volledig vrije Board Designer\line - automatische schedule recovery\line - uitgebreide analytics\line - uitgebreide logs/audit\line - complexe custom roles\line - geavanceerd Admin Portal\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De datamodellen en functionele grenzen moeten wel zo ontworpen zijn dat deze later toegevoegd kunnen worden zonder fundamentele herbouw.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b Wijzigingen in versie 0.2\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Versie 0.2 verwerkt de functionele review op vijf punten: live verschuivingen van gekoppelde parallelle queues, zichtbaarheid van instelling-overerving, nood-override van locks, expiry-behandeling van Anonymous Shows, offline robuustheid en een scherpere eis voor configureerbare Board presets.\par
+\pard\fi0\li0\sb180\sa100\f0\fs28\b 47. Samengevat productmodel\b0\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 Als we alles terugbrengen tot de essentie ontstaat:\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 EVENT                           optional\line   |\line   +-- ROOM / AREA              optional\line   |\line   +-- SHOW\line       |\line       +-- QUEUE\line       |   |\line       |   +-- GROUP\line       |   |   +-- QUEUE ITEM\line       |   |\line       |   +-- QUEUE ITEM\line       |       +-- content\line       |       +-- timer\line       |       +-- notes\line       |       +-- metadata\line       |       +-- visibility\line       |       +-- timing\line       |       +-- relations\line       |       +-- actions\line       |\line       +-- parallel QUEUES\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 SHOW STATE\line   +-- current\line   +-- next\line   +-- running timers\line   +-- schedule deviation\line   +-- messages\par
+\pard\fi0\li0\sb0\sa120\f0\fs22                 ->\par
+\pard\li360\ri360\sb40\sa120\f1\fs20\brdrt\brdrs\brdrw5\brdrcf3\brdrb\brdrs\brdrw5\brdrcf3\brdrl\brdrs\brdrw5\brdrcf3\brdrr\brdrs\brdrw5\brdrcf3 BOARDS\line   +-- Speaker\line   +-- Stage Manager\line   +-- FOH\line   +-- Public\line   +-- Agenda\line   +-- Backstage\line   +-- Custom\par
+\pard\fi0\li0\sb0\sa120\f0\fs22                 ->\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 DEVICES / USERS / EXTERNAL SYSTEMS\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 De kern van het product is daarmee:\par
+\pard\fi0\li0\sb0\sa120\f0\fs22 "Een Queue bevat informatie over wat er gebeurt. De timer is daar \'e9\'e9n eigenschap van. De Show bepaalt de actuele state. Boards bepalen wat mensen daarvan zien."\par
+}

@@ -1,0 +1,4 @@
+{
+  "extends": "@klockr/config/tsconfig/node-app.json",
+  "include": ["src", "vitest.config.ts"]
+}

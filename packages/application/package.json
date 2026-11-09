@@ -1,0 +1,24 @@
+{
+  "name": "@klockr/application",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@klockr/contracts": "workspace:*",
+    "@klockr/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@klockr/config": "workspace:*",
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  }
+}

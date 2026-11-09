@@ -1,0 +1,4 @@
+pnpm-lock.yaml
+docs/source/
+docs/design/assets/
+packages/db/migrations/meta/

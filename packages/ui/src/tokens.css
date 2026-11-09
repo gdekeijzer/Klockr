@@ -1,0 +1,22 @@
+/* KLOCKR semantic design tokens — docs/DESIGN_SYSTEM.md §3. Dark-first. */
+:root {
+  --k-bg-canvas: #0b0b0d;
+  --k-bg-chrome: #101114;
+  --k-bg-surface: #141418;
+  --k-bg-surface-raised: #1a1d22;
+  --k-bg-control: #1f2126;
+  --k-bg-control-hover: #262a31;
+  --k-border-subtle: #2b2f36;
+  --k-border-strong: #3a4049;
+  --k-text-primary: #f5f7fa;
+  --k-text-secondary: #9aa0a6;
+  --k-text-muted: #6f7680;
+  --k-accent-blue: #3b82f6;
+  --k-accent-blue-strong: #1d9bf0;
+  --k-accent-blue-dim: #0c3151;
+  --k-state-ok: #22c55e;
+  --k-state-warning: #f59e0b;
+  --k-state-critical: #ef4444;
+  --k-state-offline: #9aa0a6;
+  color-scheme: dark;
+}

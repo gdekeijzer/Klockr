@@ -1,0 +1,20 @@
+{
+  "name": "@klockr/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/library.json": "./tsconfig/library.json",
+    "./tsconfig/node-app.json": "./tsconfig/node-app.json",
+    "./tsconfig/nextjs.json": "./tsconfig/nextjs.json",
+    "./eslint": "./eslint.shared.js"
+  },
+  "peerDependencies": {
+    "@eslint/js": "*",
+    "@next/eslint-plugin-next": "*",
+    "eslint-plugin-react-hooks": "*",
+    "globals": "*",
+    "typescript-eslint": "*"
+  }
+}

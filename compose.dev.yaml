@@ -1,0 +1,22 @@
+# Local DEV/TST infrastructure only. Application processes run natively via pnpm.
+name: klockr-dev
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: klockr
+      POSTGRES_PASSWORD: klockr
+      POSTGRES_DB: klockr_dev
+    ports:
+      - '127.0.0.1:54329:5432'
+    volumes:
+      - klockr-dev-postgres:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U klockr -d klockr_dev']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  klockr-dev-postgres:
