@@ -27,14 +27,19 @@ describe('createQuickTimerShow', () => {
       expiresAt: clock.now() + ANONYMOUS_SHOW_TTL_MS,
     });
     expect(ANONYMOUS_SHOW_TTL_MS).toBe(7 * 24 * 60 * MINUTE_MS);
-    expect(queue).toMatchObject({ showId: 's1', purpose: 'program' });
+    expect(queue).toMatchObject({ showId: 's1', discipline: 'Program' });
     expect(item).toMatchObject({ queueId: 'q1' });
     expect(item.timer).toMatchObject({
       mode: 'countdown',
       status: 'idle',
       durationMs: 10 * MINUTE_MS,
     });
-    expect(board).toMatchObject({ showId: 's1', preset: 'speaker' });
+    expect(board).toMatchObject({
+      showId: 's1',
+      preset: 'speaker_confidence',
+      audience: 'stage',
+      sources: { kind: 'primary' },
+    });
   });
 
   it('rejects an invalid duration', () => {

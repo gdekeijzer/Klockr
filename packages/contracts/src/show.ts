@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { boardConfigSchema, messageSnapshotSchema } from './board';
 import { epochMsSchema, idSchema, revisionSchema } from './common';
-import { queueSnapshotSchema, thresholdRuleSchema } from './queue';
-import { MAX_DURATION_MS, timerSnapshotSchema } from './timer';
+import { queueSnapshotSchema, relationSnapshotSchema, suggestionSnapshotSchema } from './queue';
+import { MAX_DURATION_MS } from './timer';
 
 /** POST /api/v1/shows — Anonymous New Show with a Quick Timer. */
 export const createQuickTimerRequestSchema = z.object({
@@ -23,14 +24,19 @@ export const createQuickTimerResponseSchema = z.object({
 });
 export type CreateQuickTimerResponse = z.infer<typeof createQuickTimerResponseSchema>;
 
-/** POST /api/v1/shows/:showId/board-shares — new read-only Speaker Board link credential. */
+/** POST /api/v1/shows/:showId/board-shares — new read-only Board link credential. */
+export const boardShareRequestSchema = z.object({ boardId: idSchema.optional() });
 export const boardShareResponseSchema = z.object({
   boardId: idSchema,
   boardShareToken: z.string(),
 });
 export type BoardShareResponse = z.infer<typeof boardShareResponseSchema>;
 
-/** Management (Operator / Queue Editor) projection of Show State. */
+/**
+ * Management projection of the whole Show (Operator / Master / Boards admin): all peer Queues
+ * with their Current/Next, relations, pending suggestions, Board configurations and active
+ * messages. Ordered by `show.revision`.
+ */
 export const showStateSnapshotSchema = z.object({
   show: z.object({
     id: idSchema,
@@ -38,26 +44,22 @@ export const showStateSnapshotSchema = z.object({
     ownership: z.enum(['anonymous']),
     createdAt: epochMsSchema,
     expiresAt: epochMsSchema,
+    revision: revisionSchema,
+    primaryQueueId: idSchema,
   }),
-  board: z.object({ id: idSchema }),
-  /** The Program Queue (M2: the only Queue). */
-  queue: queueSnapshotSchema,
+  queues: z.array(queueSnapshotSchema),
+  relations: z.array(relationSnapshotSchema),
+  suggestions: z.array(suggestionSnapshotSchema),
+  boards: z.array(boardConfigSchema),
+  messages: z.array(messageSnapshotSchema),
+  serverTime: epochMsSchema,
 });
 export type ShowStateSnapshot = z.infer<typeof showStateSnapshotSchema>;
 
-/**
- * Read-only Speaker Board projection: only the CURRENT item's display data, its effective
- * thresholds and timer. No queue, notes, tags, management data, credentials or expiry.
- * Ordered by `queueRevision`; timers additionally by their own revision.
- */
-export const boardStateSnapshotSchema = z.object({
-  board: z.object({ id: idSchema, preset: z.enum(['speaker']) }),
-  queueRevision: revisionSchema,
-  current: z
-    .object({ id: idSchema, title: z.string(), subtitle: z.string().nullable() })
-    .nullable(),
-  warning: thresholdRuleSchema,
-  timer: timerSnapshotSchema.nullable(),
-  serverTime: epochMsSchema,
+/** Response of an accepted Show command: the authoritative Show after the change. */
+export const showCommandResponseSchema = z.object({
+  state: showStateSnapshotSchema,
+  /** Id of the object created by add/create/duplicate commands, else null. */
+  createdId: z.string().nullable(),
 });
-export type BoardStateSnapshot = z.infer<typeof boardStateSnapshotSchema>;
+export type ShowCommandResponse = z.infer<typeof showCommandResponseSchema>;

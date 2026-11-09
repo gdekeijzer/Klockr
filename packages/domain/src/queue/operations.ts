@@ -228,6 +228,8 @@ export function addItem(
     completedAt: null,
     startMode: input.startMode ?? 'manual',
     warning: null,
+    visibility: null,
+    notesAudiences: [],
     timer: timer.value,
     plannedStartAt: null,
     plannedDurationMs: null,

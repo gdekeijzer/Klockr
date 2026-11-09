@@ -39,6 +39,12 @@ export interface ItemSchedule {
   readonly startShiftMs: DurationMs | null;
   /** Soft scheduled start: how long ago a `scheduled` item should have started. */
   readonly shouldHaveStartedMs: DurationMs | null;
+  /**
+   * Cross-Queue relation timing (M4) for a not-yet-started item that follows another item:
+   * the start the relation asks for, and whether it could NOT be honoured (own sequence,
+   * Strict planned start or fixed anchor wins). Planned is never rewritten.
+   */
+  readonly link: { readonly desiredStart: EpochMs; readonly conflict: boolean } | null;
 }
 
 export interface AnchorProjection {
@@ -111,7 +117,12 @@ function projectedEndOfLive(item: QueueItem, start: EpochMs, now: EpochMs): Epoc
  * with an explicit planned start never projects before it; in Sliding only fixed anchors hold.
  * Lateness always propagates (nothing is shortened).
  */
-export function calculateSchedule(agg: QueueAggregate, now: EpochMs): ScheduleProjection {
+export function calculateSchedule(
+  agg: QueueAggregate,
+  now: EpochMs,
+  /** Desired starts from cross-Queue relations (item id -> source projected start + offset). */
+  links: ReadonlyMap<string, EpochMs> = new Map(),
+): ScheduleProjection {
   const ordered = orderedItems(agg);
   const timingMode = resolveTimingMode(agg.showSchedule.timingMode, agg.queue.timingMode);
   const strict = timingMode.mode === 'strict';
@@ -155,8 +166,10 @@ export function calculateSchedule(agg: QueueAggregate, now: EpochMs): SchedulePr
       projectedEnd: null,
       startShiftMs: null,
       shouldHaveStartedMs: null,
+      link: null,
     });
     arrivals.set(item.id, cursor);
+    let link: ItemSchedule['link'] = null;
 
     if (!item.active) {
       out.push(skip());
@@ -191,12 +204,26 @@ export function calculateSchedule(agg: QueueAggregate, now: EpochMs): SchedulePr
       cursor = end;
     } else {
       // Upcoming.
-      let candidate: EpochMs | null = cursor ?? plan.start;
-      if (candidate !== null) {
-        if (plan.start !== null && (item.fixedAnchor || (strict && item.plannedStartAt !== null))) {
-          candidate = max(candidate, plan.start);
+      const holdsPlan =
+        plan.start !== null && (item.fixedAnchor || (strict && item.plannedStartAt !== null));
+      const desired = links.get(item.id);
+      let candidate: EpochMs | null;
+      if (desired !== undefined) {
+        // Relation timing replaces the own sequence as the basis; Strict planned starts and
+        // fixed anchors still hold; never before now.
+        candidate = max(holdsPlan && plan.start !== null ? max(desired, plan.start) : desired, now);
+        const overlapsPrevious = cursor !== null && desired < cursor - agg.showSchedule.toleranceMs;
+        link = {
+          desiredStart: desired,
+          conflict:
+            overlapsPrevious || Math.abs(candidate - desired) > agg.showSchedule.toleranceMs,
+        };
+      } else {
+        candidate = cursor ?? plan.start;
+        if (candidate !== null) {
+          if (holdsPlan && plan.start !== null) candidate = max(candidate, plan.start);
+          candidate = max(candidate, now);
         }
-        candidate = max(candidate, now);
       }
       start = candidate;
       const duration =
@@ -220,6 +247,7 @@ export function calculateSchedule(agg: QueueAggregate, now: EpochMs): SchedulePr
       projectedEnd: end,
       startShiftMs: start !== null && plan.start !== null ? start - plan.start : null,
       shouldHaveStartedMs: overdue,
+      link,
     });
   });
 

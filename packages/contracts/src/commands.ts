@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { boardCommandSchema } from './board';
 import { queueCommandSchema } from './queue';
 import { timerCommandSchema } from './timer';
 
@@ -9,5 +10,6 @@ import { timerCommandSchema } from './timer';
 export const showCommandSchema = z.discriminatedUnion('type', [
   ...timerCommandSchema.options,
   ...queueCommandSchema.options,
+  ...boardCommandSchema.options,
 ]);
 export type ShowCommandDto = z.infer<typeof showCommandSchema>;
