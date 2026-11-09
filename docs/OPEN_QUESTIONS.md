@@ -74,9 +74,9 @@ Remaining:
 32. ~~Adjustment crossing zero~~ — **Resolved:** adjustment may cross zero in both directions (`02:00 +00:30 -> 02:30`, `+00:10 -00:30 -> 00:20`, `+02:14 +00:30 -> +02:44`). Overtime stays derived.
 33. ~~END on idle/stopped timer~~ — **Resolved** by separating Timer from Queue Item END: timer states are `idle | running | paused | stopped`; END / NEXT is a Queue Item / show-control command that may also apply to items without a timer or with a stopped timer. Introduced with Queue Items.
 
-## Raised during M2 (Queue operations) — baseline implemented, confirm in review
+## Raised during M2 (Queue operations) — all resolved in the M2 review (2026-11-09)
 
-34. **Next after a backwards jump.** Baseline: `next` skips completed items, so after re-running an earlier item NEXT continues with the first not-yet-completed item after it (not the item directly after it). Confirm, or prefer strict "the item directly after Current".
-35. **Note items on the Speaker Board.** Baseline: the Board shows the title/subtitle of whatever item is current, also an item without timer (e.g. an operator note made current). Item notes are never shown. Per-audience visibility ("Speaker Board hidden") arrives with Boards/Audiences (M4); until then, should a current item without timer be blanked on Speaker Boards?
-36. **Group collapse state.** Baseline: per browser view state, not persisted or shared between editors. Confirm.
-37. **"On previous END" in M2.** The start mode `on_previous_end` was implemented now because END + NEXT may only start the next timer when configured. M3 keeps the remaining start modes (Scheduled/soft start, External). Confirm naming in the UI ("Start on previous END + NEXT").
+34. ~~Next after a backwards jump~~ — **Resolved:** `next` is the first Queue Item after Current that is active **and** not completed. Completed items are never offered as Next again, also not after the operator manually jumped back to an earlier item.
+35. ~~Note items on the Speaker Board~~ — **Resolved for M2:** a standalone Note Queue Item (no timer) that is Current may show its Queue Item title (and subtitle) on the Speaker Board, without timer. The `notes` property of any Queue Item is operator/internal data and is never sent to the Speaker Board. Audience/visibility policies follow in M4.
+36. ~~Group collapse state~~ — **Resolved:** collapsed/expanded is local UI state per browser; it is not part of authoritative Show State and is not persisted.
+37. ~~"On previous END" in M2~~ — **Resolved:** `startMode = on_previous_end` belongs in M2 because END + NEXT may only start the next timer automatically when explicitly configured. It stays a plain Queue Item property; no extra object, type or hierarchy.

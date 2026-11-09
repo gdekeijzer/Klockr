@@ -2,6 +2,8 @@
 
 ## M2 — 2026-11-09 — Queue operations
 
+- review: M2 approved; OPEN_QUESTIONS #34-37 resolved (Next skips completed items; Note title may show on the Speaker Board, `notes` never; Group collapse is local UI state; `on_previous_end` stays a Queue Item property).
+
 - domain: Queue aggregate with one-level Groups, universal Queue Item (subtitle, notes, tags, active, completedAt, startMode, warning override, created/updated, revision), dense ordering (`layoutOf`/`orderedItems`), derived `nextItem` and lifecycle, pure operations incl. `endItem` (END / END + NEXT, stops a live timer as part of END, starts the next timer only with start mode `on_previous_end`), percent **and** absolute thresholds with `resolveItemThresholds` (Show -> Queue -> Item); capabilities `queue.read`, `queue.manage`, `item.control`, `show.manage`;
 - application: `executeQueueCommand` (permission per command, idempotency, expected Queue revision, automatic re-evaluation of lost races, `queue.changed` events), `QueueRepository` port with atomic `saveQueue`, Queue/Board projections;
 - contracts: Queue command DTOs, Queue/Board snapshots, `showCommandSchema` for the shared commands endpoint, `queue.state` realtime event;
