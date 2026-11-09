@@ -267,6 +267,9 @@ describe('M4 -> M5 migration on a database with M4 data', () => {
   beforeAll(async () => {
     await admin.query(`create database ${dbName}`);
     m4 = createDatabase(target);
+    // The scratch database is force-dropped at the end; connections terminated by that drop
+    // must not surface as unhandled errors.
+    m4.pool.on('error', () => undefined);
     // Migrations 0000-0006 only (= the schema ACC runs with M4).
     folder = mkdtempSync(join(tmpdir(), 'klockr-m4-'));
     cpSync(migrationsFolder, folder, { recursive: true });
