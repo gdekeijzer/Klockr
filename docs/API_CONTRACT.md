@@ -136,3 +136,17 @@ Keep wire events coarse enough that clients can evolve without coupling every UI
 ## Versioning
 
 Public API behavior is versioned. Internal code may evolve behind the application-command boundary.
+
+## Implemented in M1
+
+All bodies are validated with `packages/contracts`. Errors use `{ error: { code, message, details? } }` with HTTP status: `validation_failed` 400, missing/invalid credential 401, `forbidden` 403, `not_found` 404, `revision_conflict`/`invalid_transition` 409, `idempotency_conflict` 422.
+
+| Method | Path | Credential | Purpose |
+| --- | --- | --- | --- |
+| POST | `/api/v1/shows` | none (rate-limited 20/min/IP) | Anonymous New Show + Quick Timer `{ durationMs }` -> `{ showId, boardShareToken }`; owner credential set as HttpOnly cookie |
+| GET | `/api/v1/shows/:showId/state` | owner cookie | Operator projection of Show State |
+| POST | `/api/v1/shows/:showId/commands` | owner cookie | Timer command: `timer.start` / `pause` / `resume` / `stop` / `adjust` / `configure` (+ optional `idempotencyKey`, `expectedRevision`) |
+| POST | `/api/v1/shows/:showId/board-shares` | owner cookie | New read-only Speaker Board credential |
+| GET | `/api/v1/board/state` | `Authorization: Bearer klb_…` (rate-limited) | Board projection |
+
+The web client uses the command id as idempotency key, so retried requests never apply twice.

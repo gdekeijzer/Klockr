@@ -99,3 +99,14 @@ Log IDs and structured metadata, not secret tokens. Redact Authorization headers
 ## Cleanup
 
 Anonymous cleanup verifies expiry, active-use protection and grace/safety policy before deletion. Worker cleanup is idempotent and must never remove an actively live Show.
+
+## Implemented in M1
+
+- **Credentials:** 256-bit CSPRNG secrets, base64url, type-prefixed (`klo_` owner, `klb_` board). Only SHA-256 hashes are stored (`access_grants.token_hash`); appropriate because the secrets are high-entropy. A token presented on the wrong channel (board token as owner credential or vice versa) is rejected.
+- **Grants** (`access_grants`): `anonymous_owner` scoped to one Show (`show.read`, `timer.control`, `board.share`) and `board_share` scoped to one Board (`board.read` only). Authorization is the pure domain rule `grantPermits` (capabilities + scope), never grant/role names.
+- **Owner credential in the browser:** HttpOnly, `SameSite=Strict`, `Path=/` cookie per Show (`Secure` when `COOKIE_SECURE=true`). The Show id in the operator URL grants nothing; other browsers get a "no control access" page. Commands require JSON bodies, which together with SameSite=Strict blocks cross-site request forgery.
+- **Board link:** `/b/<board token>`; the page sets `referrer: no-referrer` and `noindex`. The Board has no management data, no expiry warnings and cannot reach any mutating endpoint.
+- **Cross-Show probing:** a command for another Show's item via your own Show id returns `not_found`.
+- **Rate limits:** Show creation 20/min/IP, board state 120/min/IP, realtime handshakes 60/min/IP (in-process; one server instance). The server trusts `X-Forwarded-For` and must only be reachable through the reverse proxy.
+- **Logging:** cookie, authorization and set-cookie headers are redacted; realtime logs contain role, Show id and rejection reason only.
+- Not yet: credential revocation UI, PIN/expiry on board links, cleanup of expired anonymous Shows (worker), CSP headers.

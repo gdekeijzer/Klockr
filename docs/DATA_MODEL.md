@@ -127,3 +127,17 @@ Show stores ownership/lifecycle state sufficient to identify:
 - claimed/owned;
 - expiry timestamp/policy;
 - active-use protection during cleanup.
+
+## Implemented tables (M1, migration `0001_quick_timer`)
+
+| Table | Contents |
+| --- | --- |
+| `shows` | id, title, ownership (`anonymous`), primary_queue_id, created_at, last_active_at, expires_at (created + 7 days; cleanup eligibility) |
+| `queues` | id, show_id, name, purpose (`program`), position |
+| `queue_items` | id, queue_id, title, position |
+| `item_timers` | Timer capability per Queue Item: mode, status (`idle/running/paused/stopped`), duration_ms, adjustment_ms, started_at, paused_at, paused_total_ms, stopped_at, revision, updated_at. No overtime column; no ticks |
+| `boards` | id, show_id, preset (`speaker`), created_at |
+| `access_grants` | id, kind (`anonymous_owner`/`board_share`), show_id, board_id (required iff board_share), token_hash (unique), created_at, expires_at, revoked_at |
+| `idempotency_records` | (scope, key) -> fingerprint, result JSON |
+
+Timer writes are compare-and-set on `revision`. All child rows cascade on Show deletion (for the future cleanup worker).

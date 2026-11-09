@@ -2,9 +2,27 @@
 
 ## Phase
 
-**M0 complete (2026-11-09) — ready for M1 review.**
+**M1 complete (2026-11-09) — Anonymous Quick Timer vertical slice. Awaiting review before M2.**
 
-Repository, tooling and the timer domain/application kernel exist and pass all checks. No product UI exists yet.
+## M1 delivered
+
+- anonymous New Show -> Quick Timer: Show + Program Queue + one timed Queue Item + Speaker Board, `expiresAt` = created + 7 days (cleanup not active yet)
+- Operator View (`/show/<id>`): large timer, state/phase chips, Start/Pause/Resume/Stop/Restart, ±10/±30 s, duration set while idle/stopped, connection status + offline banner, Share Speaker Board, anonymous-expiry notice
+- Speaker Board (`/b/<token>`): near-black, white normal digits, amber warning, red critical/overtime, PAUSED/STOPPED labels, progress, subtle RECONNECTING, fullscreen, wake lock
+- authoritative state on one server; Socket.IO read channel; transitions only, no ticks; revision-gated client state; clock-offset estimation; local projection with `deriveTimer`
+- owner credential (HttpOnly cookie) and separate read-only board credential, both hashed at rest; capability-based grant authorization
+- PostgreSQL persistence (migration `0001_quick_timer`); Shows survive server restart (tested)
+- design tokens generated from `docs/design/tokens.json`; self-hosted Inter/Roboto Mono
+- tests: 138 unit/component tests (domain 49, contracts 10, application 25, ui 15, server 19, worker 2, web 18), 6 PostgreSQL integration tests, 4 Playwright E2E incl. server outage/restart
+
+## Known limitations after M1
+
+- Warning/critical thresholds are provisional (05:00 / 01:00) and make short timers amber/red from the start — `OPEN_QUESTIONS.md` #5 needs a decision.
+- No END/NEXT, Queue editing, multiple items, Current/Next (M2).
+- Board links cannot be revoked from the UI yet; no PIN/expiry; no anonymous cleanup job; no "Claim Show".
+- The owner credential is bound to one browser; clearing cookies loses control of the Show (by design until accounts/claim in M6).
+- Rate limits and realtime state are in-process (single instance, as accepted for V1).
+- Logo is a plain text label until the final SVG wordmark exists.
 
 ## M0 delivered
 
@@ -82,9 +100,9 @@ Repository, tooling and the timer domain/application kernel exist and pass all c
 
 ## Next milestone
 
-**M1 — Anonymous Quick Timer vertical slice** (see `ROADMAP.md`). Review M0 before starting.
+**M2 — Queue operations** (see `ROADMAP.md`). Review M1 before starting.
 
-## Decisions that do not block M1
+## Decisions that do not block M2
 
 - concrete magic-link/auth library;
 - transactional email provider;

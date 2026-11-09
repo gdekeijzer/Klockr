@@ -6,7 +6,7 @@ import { buildApp } from './app';
 describe('server health', () => {
   it('GET /health returns a valid liveness response', async () => {
     const clock = new ManualClock(Date.UTC(2026, 10, 9, 12, 0, 0));
-    const app = buildApp({ version: 'test', logLevel: 'silent', clock });
+    const app = await buildApp({ version: 'test', logLevel: 'silent', clock });
     const res = await app.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
     const body = healthResponseSchema.parse(res.json());
@@ -19,7 +19,7 @@ describe('server health', () => {
   });
 
   it('GET /health/ready skips the database check when none is configured', async () => {
-    const app = buildApp({ version: 'test', logLevel: 'silent' });
+    const app = await buildApp({ version: 'test', logLevel: 'silent' });
     const res = await app.inject({ method: 'GET', url: '/health/ready' });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ checks: { database: 'skipped' } });
@@ -27,7 +27,7 @@ describe('server health', () => {
   });
 
   it('GET /health/ready reports 503 when the database is unreachable', async () => {
-    const app = buildApp({
+    const app = await buildApp({
       version: 'test',
       logLevel: 'silent',
       checkDatabase: () => Promise.resolve(false),

@@ -84,3 +84,15 @@ Prefer domain/application events for discrete transitions:
 - Board/Device presence changed.
 
 Do not treat WebSocket transport events as the domain model itself.
+
+## Implementation (M1)
+
+- **Transport:** Socket.IO 4.8 attached to the Fastify HTTP server, path `/realtime`, one authoritative server instance, no Redis. Chosen because the accepted baseline asks for a Socket.IO-class transport and it provides automatic reconnect with backoff, rooms (one per Show), acknowledgements (used for clock probes) and an HTTP long-polling fallback for restrictive venue networks, without extra infrastructure.
+- **Read channel only.** Mutations are HTTP commands (`POST /api/v1/shows/:showId/commands`) through `packages/application`; the socket only delivers state.
+- **Wire events** (`packages/contracts/src/realtime.ts`): on every connect/reconnect the server sends a full snapshot (`show.snapshot` for Operators, `board.snapshot` for Boards); after each committed transition it sends `timer.state` (a timer snapshot with `revision` and `serverTime`). No ticks are sent.
+- **Ordering:** clients keep the snapshot with the highest `revision` (`apps/web/lib/timer-sync.ts`); an equal revision (reconnect) is accepted, older ones are dropped.
+- **Clock offset:** clients send `clock.ping` with an ack (on connect and every 15 s); the NTP-style midpoint of the lowest-RTT sample in a small window is used, with 150 ms hysteresis so jitter never makes the display jump. Before the first ping completes, the snapshot's `serverTime` seeds the offset.
+- **Projection:** clients render `deriveTimer(lastSnapshot, Date.now() + offset)` from `@klockr/domain` about 10 times per second. This is presentation only.
+- **Board during an outage:** keeps rendering from the last snapshot; a small `RECONNECTING` marker appears; no loader or error page after the first sync.
+- **Operator during an outage:** `RECONNECTING` (then `OFFLINE` after 10 s) status chip, a full-width banner, and all controls disabled. The UI never applies a command optimistically; state changes only on server confirmation (HTTP response or realtime event).
+- **Reconnect:** the client is `connected` only after the post-reconnect snapshot arrived; if nothing changed the revision is equal and nothing visibly moves; if the server state differs, the newer revision replaces local state immediately (a real correction).

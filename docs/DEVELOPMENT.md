@@ -17,17 +17,24 @@ pnpm db:migrate
 pnpm dev          # web :3000, server :4000, worker
 ```
 
+Open http://localhost:3000, create a Quick Timer, then open the Speaker Board link from the Operator View in another window or device. The web app proxies `/api/v1` and `/realtime` to the server (`KLOCKR_SERVER_URL`, Next rewrites); in ACC/PRD the reverse proxy does this.
+
 Health endpoints:
 
 - server: `GET http://127.0.0.1:4000/health` (liveness), `GET /health/ready` (includes DB check)
 - web: `GET http://localhost:3000/healthz`
+
+Screens: `/` (New Quick Timer), `/show/<showId>` (Operator View, owner cookie required), `/b/<board token>` (Speaker Board, read-only).
 
 ## Checks
 
 ```bash
 pnpm check              # format:check, lint, typecheck, test, build
 pnpm test:integration   # needs PostgreSQL (pnpm db:up)
+pnpm test:e2e           # needs PostgreSQL and a build; port 4000 must be free
 ```
+
+E2E (Playwright, `apps/web/e2e`) starts `next start` itself and launches the built API server per test file, so a test can stop and restart it (outage/reconnect + persistence). One-time browser install: `pnpm --filter @klockr/web exec playwright install chromium`.
 
 Individual: `pnpm format`, `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`.
 
@@ -51,7 +58,9 @@ ESLint enforces architecture boundaries: `packages/domain` may not import framew
 
 Never edit an applied migration; add a new one. Only add tables when the milestone that needs them is implemented.
 
-Current migrations: `0000_bootstrap` (`system_meta`, infrastructure-only, proves the toolchain).
+Current migrations: `0000_bootstrap` (`system_meta`, infrastructure-only), `0001_quick_timer` (M1 tables, see `DATA_MODEL.md`).
+
+The server build copies `packages/db/migrations` to `apps/server/dist/migrations`; with `MIGRATE_ON_START=true` the server applies them at startup (local/E2E convenience). ACC/PRD migrate as an explicit release step.
 
 ## Dependency build scripts
 

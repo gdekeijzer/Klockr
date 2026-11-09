@@ -1,15 +1,29 @@
-import type { EpochMs, QueueItemId, Result, TimerState } from '@klockr/domain';
+import type {
+  AccessGrant,
+  Board,
+  BoardId,
+  EpochMs,
+  GrantId,
+  Permission,
+  QueueItem,
+  QueueItemId,
+  QuickTimerShow,
+  Result,
+  Show,
+  ShowId,
+  TimerState,
+} from '@klockr/domain';
 import type { Actor } from './command';
 import type { AppError, CommandResult } from './errors';
 
-/** Capabilities are checked, never role names. Roles are bundles of these (AUTH_RBAC.md). */
-export type Permission = 'timer.control';
+export type { Permission } from '@klockr/domain';
 
-export interface ResourceRef {
-  readonly kind: 'queueItem';
-  readonly id: string;
-}
+export type ResourceRef =
+  | { readonly kind: 'queueItem'; readonly id: string }
+  | { readonly kind: 'show'; readonly id: string }
+  | { readonly kind: 'board'; readonly id: string };
 
+/** Capabilities are checked, never role names. Roles/grant kinds are bundles of these. */
 export interface Authorizer {
   can(actor: Actor, permission: Permission, resource: ResourceRef): Promise<boolean>;
 }
@@ -27,6 +41,53 @@ export interface TimerRepository {
   ): Promise<Result<void, AppError>>;
 }
 
+/** Resolves which Show owns an item/board. Used for scoping and event routing. */
+export interface ShowLocator {
+  showIdOfItem(queueItemId: QueueItemId): Promise<ShowId | null>;
+  showIdOfBoard(boardId: BoardId): Promise<ShowId | null>;
+}
+
+/** Durable record of a newly issued credential. Only the hash of the secret is stored. */
+export interface NewGrantRecord {
+  readonly grant: AccessGrant;
+  readonly tokenHash: string;
+}
+
+export interface ShowRepository extends ShowLocator {
+  /** Persist all parts of a new Quick Timer Show and its grants atomically. */
+  createQuickTimerShow(bundle: QuickTimerShow, grants: readonly NewGrantRecord[]): Promise<void>;
+  getShow(showId: ShowId): Promise<Show | null>;
+  /** The Show's program item (Quick Timer: its only item). */
+  getPrimaryItem(showId: ShowId): Promise<QueueItem | null>;
+  getBoard(boardId: BoardId): Promise<Board | null>;
+  getBoardOfShow(showId: ShowId): Promise<Board | null>;
+  /** Record management activity (feeds anonymous lifecycle/cleanup protection). */
+  touch(showId: ShowId, at: EpochMs): Promise<void>;
+}
+
+export interface GrantRepository {
+  create(record: NewGrantRecord): Promise<void>;
+  findById(id: GrantId): Promise<AccessGrant | null>;
+  findByTokenHash(tokenHash: string): Promise<AccessGrant | null>;
+}
+
+export type TokenKind = 'owner' | 'board';
+
+/**
+ * Issues and hashes opaque high-entropy credentials. Implementations must use a CSPRNG and a
+ * one-way hash; secrets are never persisted or logged.
+ */
+export interface TokenService {
+  issue(kind: TokenKind): { readonly token: string; readonly hash: string };
+  hash(token: string): string;
+  /** Kind encoded in the token's prefix, or null when malformed. */
+  kindOf(token: string): TokenKind | null;
+}
+
+export interface IdGenerator {
+  uuid(): string;
+}
+
 export interface StoredOutcome {
   /** Fingerprint of the command intent (type + payload) the key was first used with. */
   readonly fingerprint: string;
@@ -42,6 +103,7 @@ export interface TimerTransitionedEvent {
   readonly type: 'timer.transitioned';
   readonly commandId: string;
   readonly commandType: string;
+  readonly showId: ShowId;
   readonly queueItemId: QueueItemId;
   readonly state: TimerState;
   readonly occurredAt: EpochMs;

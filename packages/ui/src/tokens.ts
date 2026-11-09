@@ -1,30 +1,67 @@
+import source from '../../../docs/design/tokens.json';
+
 /**
- * KLOCKR semantic design tokens (docs/DESIGN_SYSTEM.md §3).
- * Blue = product/information/selection. Green/amber/red = operational state only.
- * Keep in sync with tokens.css; the test asserts they match.
+ * Design tokens. `docs/design/tokens.json` is the single source of truth; this module only
+ * flattens it into CSS custom properties. Never copy token values into code.
+ *
+ * Naming: `color.background.canvas` -> `--k-background-canvas`, `spacing.4` -> `--k-spacing-4`,
+ * `radius.control` -> `--k-radius-control`, `typography.uiFamily` -> `--k-typography-ui-family`.
  */
-export const colorTokens = {
-  'bg-canvas': '#0B0B0D',
-  'bg-chrome': '#101114',
-  'bg-surface': '#141418',
-  'bg-surface-raised': '#1A1D22',
-  'bg-control': '#1F2126',
-  'bg-control-hover': '#262A31',
-  'border-subtle': '#2B2F36',
-  'border-strong': '#3A4049',
-  'text-primary': '#F5F7FA',
-  'text-secondary': '#9AA0A6',
-  'text-muted': '#6F7680',
-  'accent-blue': '#3B82F6',
-  'accent-blue-strong': '#1D9BF0',
-  'accent-blue-dim': '#0C3151',
-  'state-ok': '#22C55E',
-  'state-warning': '#F59E0B',
-  'state-critical': '#EF4444',
-  'state-offline': '#9AA0A6',
-} as const;
+interface TokenLeaf {
+  readonly $value: string;
+}
 
-export type ColorToken = keyof typeof colorTokens;
+const kebab = (s: string): string => s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 
-/** CSS custom property reference for a token, e.g. `var(--k-text-primary)`. */
-export const cssVar = (token: ColorToken): string => `var(--k-${token})`;
+function isLeaf(value: unknown): value is TokenLeaf {
+  return typeof value === 'object' && value !== null && '$value' in value;
+}
+
+function flatten(node: unknown, path: readonly string[], out: Map<string, string>): void {
+  if (isLeaf(node)) {
+    const [group, ...rest] = path;
+    const parts = group === 'color' ? rest : path;
+    out.set(`--k-${parts.map(kebab).join('-')}`, node.$value);
+    return;
+  }
+  if (typeof node !== 'object' || node === null) return;
+  for (const [key, child] of Object.entries(node)) {
+    if (key === 'meta' || key.startsWith('$')) continue;
+    flatten(child, [...path, key], out);
+  }
+}
+
+const flat = new Map<string, string>();
+flatten(source, [], flat);
+
+/** All tokens as CSS custom property name -> value. */
+export const tokenVariables: ReadonlyMap<string, string> = flat;
+
+/** `:root { ... }` block for injection into the document. Content comes from the repo only. */
+export function tokensCss(): string {
+  const body = [...flat].map(([name, value]) => `  ${name}: ${value};`).join('\n');
+  return `:root {\n${body}\n  color-scheme: dark;\n}\n`;
+}
+
+export type SemanticColor =
+  | 'background-canvas'
+  | 'background-chrome'
+  | 'background-surface'
+  | 'background-surface-raised'
+  | 'background-control'
+  | 'background-control-hover'
+  | 'border-subtle'
+  | 'border-strong'
+  | 'text-primary'
+  | 'text-secondary'
+  | 'text-muted'
+  | 'accent-blue'
+  | 'accent-blue-strong'
+  | 'accent-blue-dim'
+  | 'state-ok'
+  | 'state-warning'
+  | 'state-critical'
+  | 'state-offline';
+
+/** `var(--k-…)` reference for a semantic color token. */
+export const colorVar = (token: SemanticColor): string => `var(--k-${token})`;

@@ -1,4 +1,5 @@
 {
   "extends": "@klockr/config/tsconfig/node-app.json",
-  "include": ["src", "vitest.config.ts"]
+  "compilerOptions": { "resolveJsonModule": true },
+  "include": ["src", "vitest.config.ts", "../../docs/design/tokens.json"]
 }

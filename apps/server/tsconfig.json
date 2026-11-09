@@ -1,4 +1,4 @@
 {
   "extends": "@klockr/config/tsconfig/node-app.json",
-  "include": ["src", "tsup.config.ts", "vitest.config.ts"]
+  "include": ["src", "tsup.config.ts", "vitest.config.ts", "vitest.integration.config.ts"]
 }

@@ -17,11 +17,13 @@ export interface Command<TType extends string, TPayload> {
 }
 
 /**
- * Who issues a command. Grant kinds are deliberately separate (CLAUDE.md, ADR-0007).
- * Board shares and Devices are read-only display grants and never issue control commands.
+ * Who issues a command or query. Grant kinds are deliberately separate (CLAUDE.md, ADR-0007).
+ * `id` is the grant/credential record id, never the secret itself.
+ * Board shares and Devices are read-only display grants; their capabilities exclude mutation.
  */
 export type Actor =
   | { readonly kind: 'management_grant'; readonly id: string }
+  | { readonly kind: 'board_share'; readonly id: string }
   | { readonly kind: 'role_link'; readonly id: string }
   | { readonly kind: 'user'; readonly id: string }
   | { readonly kind: 'api_token'; readonly id: string }

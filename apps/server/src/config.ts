@@ -6,6 +6,10 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   DATABASE_URL: z.url().optional(),
   KLOCKR_VERSION: z.string().default('0.0.0-dev'),
+  /** Secure attribute on credential cookies; enable whenever served over HTTPS. */
+  COOKIE_SECURE: z.stringbool().default(false),
+  /** Apply pending migrations at startup (local dev/test convenience; ACC/PRD migrate explicitly). */
+  MIGRATE_ON_START: z.stringbool().default(false),
 });
 
 export type ServerConfig = z.infer<typeof envSchema>;

@@ -1,6 +1,7 @@
 import type { TimerCommandDto, TimerSnapshot } from '@klockr/contracts';
 import {
   adjustTimer,
+  configureTimer,
   ok,
   pauseTimer,
   QueueItemId,
@@ -16,7 +17,13 @@ import {
 import type { Command, CommandContext } from '../command';
 import { appError, type CommandResult } from '../errors';
 import { stableStringify } from '../idempotency';
-import type { Authorizer, EventPublisher, IdempotencyStore, TimerRepository } from '../ports';
+import type {
+  Authorizer,
+  EventPublisher,
+  IdempotencyStore,
+  ShowLocator,
+  TimerRepository,
+} from '../ports';
 
 export interface TimerTarget {
   readonly queueItemId: string;
@@ -30,6 +37,11 @@ export type AdjustTimerCommand = Command<
   'timer.adjust',
   TimerTarget & { readonly deltaMs: number }
 >;
+/** Set duration/mode while idle or stopped. */
+export type ConfigureTimerCommand = Command<
+  'timer.configure',
+  TimerTarget & { readonly mode: 'countdown' | 'countup'; readonly durationMs: number }
+>;
 /*
  * No END command here: END / NEXT is a Queue Item / show-control command (it may end an item
  * without a timer or with a stopped timer, run end actions and move current/next). It is added
@@ -41,7 +53,8 @@ export type TimerCommand =
   | PauseTimerCommand
   | ResumeTimerCommand
   | StopTimerCommand
-  | AdjustTimerCommand;
+  | AdjustTimerCommand
+  | ConfigureTimerCommand;
 
 export interface TimerCommandOutcome {
   readonly queueItemId: QueueItemId;
@@ -51,6 +64,7 @@ export interface TimerCommandOutcome {
 export interface TimerCommandDeps {
   readonly clock: Clock;
   readonly timers: TimerRepository;
+  readonly locator: ShowLocator;
   readonly idempotency: IdempotencyStore;
   readonly authorizer: Authorizer;
   readonly events: EventPublisher;
@@ -73,6 +87,10 @@ function transitionFor(command: TimerCommand): Transition {
     case 'timer.adjust': {
       const { deltaMs } = command.payload;
       return (state, now) => adjustTimer(state, deltaMs, now);
+    }
+    case 'timer.configure': {
+      const { mode, durationMs } = command.payload;
+      return (state) => configureTimer(state, { mode, durationMs });
     }
   }
 }
@@ -122,7 +140,8 @@ export async function executeTimerCommand(
   }
 
   const current = await deps.timers.get(queueItemId);
-  if (!current) return appError('not_found', 'Timer not found', { queueItemId });
+  const showId = await deps.locator.showIdOfItem(queueItemId);
+  if (!current || !showId) return appError('not_found', 'Timer not found', { queueItemId });
 
   if (command.expectedRevision !== undefined && command.expectedRevision !== current.revision) {
     return appError('revision_conflict', 'Timer has changed since it was read', {
@@ -148,6 +167,7 @@ export async function executeTimerCommand(
       type: 'timer.transitioned',
       commandId: command.commandId,
       commandType: command.type,
+      showId,
       queueItemId,
       state: transitioned.value,
       occurredAt: now,

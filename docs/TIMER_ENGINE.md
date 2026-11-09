@@ -172,4 +172,6 @@ Implementation rules (the first two confirmed in the M0 review, see decisions ab
 - `configure` is only allowed in `idle` or `stopped` and resets the timer to `idle`.
 - Durations are integer milliseconds, capped at 7 days.
 
-Display rounding (e.g. how 59.4 s is shown) is a presentation concern and is not decided in the domain.
+Display rounding is a presentation concern, implemented in `packages/ui` (`formatTimer`): countdown remaining is floored and overtime ceiled, so each displayed second lasts one second and the documented sequence `00:01 -> 00:00 -> +00:01` holds.
+
+Timer phase (`normal | warning | critical | overtime`) is derived by `timerPhase()` in the domain; thresholds are provisional (see `OPEN_QUESTIONS.md` #5). An idle timer is always `normal`.

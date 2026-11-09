@@ -11,7 +11,7 @@ These questions are deliberately deferred. Claude must not silently invent produ
 
 3. Reconfirm overtime adjustment semantics during UI prototype testing (`+30` at `+02:14` currently means `+02:44`).
 4. Exact default transport increments per screen/device preset.
-5. Default Quick Timer warning thresholds.
+5. Default Quick Timer warning thresholds. **M1 uses a provisional default** taken from the FUNCTIONAL_DESIGN examples (warning at 05:00 remaining, critical at 01:00) — `PROVISIONAL_DEFAULT_THRESHOLDS` in `packages/domain/src/timer/phase.ts`. Consequence seen in M1: timers of 5 minutes or less are amber from their first second, and 1 minute or less red. Needs a product decision (e.g. percentage-based for short timers) before M2 inheritance.
 
 ## Scheduling
 

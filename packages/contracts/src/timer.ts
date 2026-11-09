@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { commandSchema, durationMsSchema, epochMsSchema, idSchema, revisionSchema } from './common';
 
+/** Mirrors the domain limit (7 days). */
+export const MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1_000;
+
 export const timerModeSchema = z.enum(['countdown', 'countup']);
 export const timerStatusSchema = z.enum(['idle', 'running', 'paused', 'stopped']);
 
@@ -16,6 +19,14 @@ export const adjustTimerCommandSchema = commandSchema(
     deltaMs: durationMsSchema.refine((v) => v !== 0, 'deltaMs must be non-zero'),
   }),
 );
+/** Set mode/duration while the timer is idle or stopped (resets it to idle). */
+export const configureTimerCommandSchema = commandSchema(
+  'timer.configure',
+  timerTarget.extend({
+    mode: timerModeSchema,
+    durationMs: z.int().nonnegative().max(MAX_DURATION_MS),
+  }),
+);
 /*
  * There is deliberately no timer END command. END / NEXT ends a Queue Item (also one without a
  * timer) and is introduced with Queue Items as a Queue Item / show-control command.
@@ -28,6 +39,7 @@ export const timerCommandSchema = z.discriminatedUnion('type', [
   resumeTimerCommandSchema,
   stopTimerCommandSchema,
   adjustTimerCommandSchema,
+  configureTimerCommandSchema,
 ]);
 export type TimerCommandDto = z.infer<typeof timerCommandSchema>;
 export type TimerCommandType = TimerCommandDto['type'];

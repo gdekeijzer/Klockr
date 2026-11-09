@@ -1,5 +1,16 @@
 # Changelog
 
+## M1 — 2026-11-09 — Anonymous Quick Timer vertical slice
+
+- domain: `createQuickTimerShow` (anonymous Show, Program Queue, timed Queue Item, Speaker Board, 7-day expiry), access grants with capability bundles and scope (`grantPermits`), derived `timerPhase` with provisional thresholds;
+- application: `createQuickTimer`, `createBoardShare`, `getShowState`, `getBoardState`, `runShowTimerCommand`, `timer.configure`, `authenticateToken`, `GrantAuthorizer`; events carry `showId`;
+- contracts: Show/Board snapshots, create/share DTOs, typed realtime event maps;
+- db: migration `0001_quick_timer` (shows, queues, queue_items, item_timers, boards, access_grants, idempotency_records) and PostgreSQL repositories (compare-and-set timer writes, durable idempotency);
+- server: HTTP API (`/api/v1/shows`, `/state`, `/commands`, `/board-shares`, `/board/state`), HttpOnly owner cookie, hashed type-prefixed tokens, rate limits, log redaction, Socket.IO realtime read channel with snapshot-on-connect, migrations shipped with the bundle;
+- web: New Quick Timer page, Operator View, Speaker Board, revision-gated realtime client with clock-offset estimation and offline projection; tokens generated from `docs/design/tokens.json`; self-hosted fonts;
+- tests: 138 unit/component, 6 PostgreSQL integration, 4 Playwright E2E (sync flow, server outage + restart, invalid board link, foreign browser); E2E added to CI;
+- docs: realtime/API/security/data-model implementation sections, development guide, provisional thresholds noted in OPEN_QUESTIONS #5.
+
 ## M0 review — 2026-11-09
 
 - timer states reduced to `idle | running | paused | stopped`; removed `ended`, `endedAt`, `endTimer` and the `item.end` command/contract (END / NEXT is a Queue Item command, added with Queue Items);

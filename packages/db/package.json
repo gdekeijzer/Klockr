@@ -14,6 +14,8 @@
     "migrate": "node --env-file-if-exists=../../.env --import tsx scripts/migrate.ts"
   },
   "dependencies": {
+    "@klockr/application": "workspace:*",
+    "@klockr/domain": "workspace:*",
     "drizzle-orm": "0.45.4",
     "pg": "8.23.1"
   },

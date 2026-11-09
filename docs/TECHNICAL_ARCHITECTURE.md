@@ -180,6 +180,10 @@ See `DEPLOYMENT_RUNTIME.md` and ADR-0008.
 | Lint/format     | eslint / typescript-eslint / prettier | 10.14.0 / 8.72.1 / 3.9.10                           |
 | App bundling    | tsup / tsx (dev)                      | 9.0.0 / 4.23.15                                     |
 
-Realtime transport (Socket.IO-class) is not installed yet; it arrives with M1.
+| Realtime (M1) | socket.io / socket.io-client | 4.8.4 / 4.8.4 |
+| HTTP plugins (M1) | @fastify/cookie / @fastify/rate-limit / cookie | 11.1.5 / 11.2.2 / 2.0.2 |
+| Fonts (M1) | @fontsource-variable/inter / @fontsource/roboto-mono | 5.3.0 / 5.3.0 (self-hosted, work offline) |
+
+Realtime transport rationale and behavior: `REALTIME_OFFLINE.md` (Implementation M1).
 
 See `docs/DEVELOPMENT.md` for commands, build model and migration workflow.

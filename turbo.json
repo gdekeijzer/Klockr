@@ -18,6 +18,11 @@
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "test:integration": {
+      "outputs": [],
+      "cache": false,
+      "env": ["DATABASE_URL"]
     }
   }
 }

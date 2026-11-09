@@ -1,9 +1,48 @@
-@import '@klockr/ui/tokens.css';
+/* Global baseline. All colors/spacing come from tokens (--k-*), see packages/ui/src/tokens.ts. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
 
 html,
 body {
   margin: 0;
-  background: var(--k-bg-canvas);
+  min-height: 100%;
+  background: var(--k-background-canvas);
   color: var(--k-text-primary);
-  font-family: system-ui, sans-serif;
+  font-family: 'Inter Variable', var(--k-typography-ui-family);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--k-accent-blue-strong);
+  outline-offset: 2px;
+}
+
+.mono {
+  font-family: 'Roboto Mono', var(--k-typography-technical-family);
+  font-variant-numeric: tabular-nums;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--k-text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
 }

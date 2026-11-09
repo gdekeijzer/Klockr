@@ -1,0 +1,83 @@
+.board {
+  position: relative;
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  justify-items: center;
+  padding: 3vh 4vw;
+  background: var(--k-background-canvas);
+  overflow: hidden;
+}
+
+.topbar {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.brand {
+  font-size: clamp(12px, 1.4vw, 20px);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--k-text-muted);
+}
+
+/* Subtle by design: never a full-screen error during brief outages. */
+.reconnecting {
+  font-size: clamp(11px, 1.1vw, 16px);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--k-state-offline);
+}
+
+.digits {
+  align-self: center;
+  font-size: clamp(64px, 24vw, 40vh);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+
+.state {
+  min-height: 1.4em;
+  display: flex;
+  gap: 2vw;
+  font-size: clamp(16px, 3vw, 48px);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--k-text-secondary);
+}
+
+.progress {
+  width: 100%;
+  max-width: 1400px;
+  padding-top: 2vh;
+}
+
+.message {
+  align-self: center;
+  grid-row: 2;
+  color: var(--k-text-secondary);
+  font-size: 20px;
+}
+
+.fullscreen {
+  position: absolute;
+  right: 2vw;
+  bottom: 2vh;
+  padding: 8px 14px;
+  background: var(--k-background-control);
+  border: 1px solid var(--k-border-subtle);
+  border-radius: var(--k-radius-control);
+  color: var(--k-text-secondary);
+  opacity: 0;
+  transition: opacity 200ms;
+  cursor: pointer;
+}
+
+.fullscreen[data-visible='true'],
+.fullscreen:focus-visible {
+  opacity: 1;
+}

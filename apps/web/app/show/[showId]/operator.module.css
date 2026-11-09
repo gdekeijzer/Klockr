@@ -1,0 +1,237 @@
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--k-spacing-6);
+  padding: var(--k-spacing-3) var(--k-spacing-6);
+  background: var(--k-background-chrome);
+  border-bottom: 1px solid var(--k-border-subtle);
+}
+
+.brand {
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 0.16em;
+}
+
+.showName {
+  display: flex;
+  align-items: baseline;
+  gap: var(--k-spacing-2);
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.showId {
+  font-size: 12px;
+  color: var(--k-text-muted);
+}
+
+.headerRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--k-spacing-6);
+}
+
+.clock {
+  display: grid;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.offlineBanner {
+  padding: var(--k-spacing-3) var(--k-spacing-6);
+  background: var(--k-background-surface-raised);
+  border-bottom: 2px solid var(--k-state-warning);
+  color: var(--k-text-primary);
+}
+
+.grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: var(--k-spacing-4);
+  padding: var(--k-spacing-4);
+  align-content: start;
+}
+
+.panel {
+  display: grid;
+  gap: var(--k-spacing-3);
+  align-content: start;
+  padding: var(--k-spacing-5);
+  background: var(--k-background-surface);
+  border: 1px solid var(--k-border-subtle);
+  border-radius: var(--k-radius-panel);
+}
+
+.side {
+  display: grid;
+  gap: var(--k-spacing-4);
+  align-content: start;
+}
+
+.timerPanel {
+  gap: var(--k-spacing-4);
+}
+
+.timerTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chips {
+  display: flex;
+  gap: var(--k-spacing-2);
+}
+
+.digits {
+  font-size: clamp(88px, 12vw, 176px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+}
+
+.facts dd {
+  margin: var(--k-spacing-1) 0 0;
+  font-size: 22px;
+}
+
+.controls {
+  grid-column: 1 / -1;
+  grid-template-columns: auto auto 1fr;
+  align-items: start;
+  gap: var(--k-spacing-6);
+}
+
+.transport,
+.adjust {
+  display: grid;
+  gap: var(--k-spacing-2);
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--k-spacing-2);
+}
+
+.button {
+  min-height: 48px;
+  min-width: 72px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--k-spacing-4);
+  background: var(--k-background-control);
+  border: 1px solid var(--k-border-subtle);
+  border-radius: var(--k-radius-control);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--k-background-control-hover);
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.primary {
+  min-width: 140px;
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* GO actions use the operational "ok" color; PAUSE is a neutral product action (blue edge). */
+.primary[data-kind='timer.start'],
+.primary[data-kind='timer.resume'] {
+  background: var(--k-state-ok);
+  border-color: var(--k-state-ok);
+  color: var(--k-background-canvas);
+}
+
+.primary[data-kind='timer.start']:hover:not(:disabled),
+.primary[data-kind='timer.resume']:hover:not(:disabled) {
+  background: var(--k-state-ok);
+  filter: brightness(1.1);
+}
+
+.primary[data-kind='timer.pause'] {
+  border: 2px solid var(--k-accent-blue);
+}
+
+.duration {
+  display: grid;
+  grid-template-columns: auto 140px auto;
+  align-items: center;
+  gap: var(--k-spacing-2);
+  justify-self: end;
+  align-self: end;
+}
+
+.input {
+  min-height: 44px;
+  padding: 0 var(--k-spacing-3);
+  background: var(--k-background-control);
+  border: 1px solid var(--k-border-strong);
+  border-radius: var(--k-radius-control);
+  width: 100%;
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--k-state-warning);
+}
+
+.muted {
+  margin: 0;
+  color: var(--k-text-secondary);
+}
+
+.error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--k-state-critical);
+  font-weight: 600;
+}
+
+.denied {
+  max-width: 560px;
+  margin: 15vh auto;
+  padding: var(--k-spacing-6);
+  display: grid;
+  gap: var(--k-spacing-4);
+}
+
+.denied a {
+  color: var(--k-accent-blue-strong);
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .controls {
+    grid-template-columns: 1fr;
+  }
+  .duration {
+    justify-self: start;
+  }
+}

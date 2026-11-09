@@ -19,7 +19,8 @@
     "db:down": "node scripts/compose.mjs down",
     "db:generate": "pnpm --filter @klockr/db generate",
     "db:migrate": "pnpm --filter @klockr/db migrate",
-    "test:integration": "pnpm --filter @klockr/db test:integration"
+    "test:integration": "turbo run test:integration --concurrency=1",
+    "test:e2e": "pnpm --filter @klockr/web test:e2e"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

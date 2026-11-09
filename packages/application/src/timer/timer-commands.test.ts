@@ -5,6 +5,7 @@ import {
   ManualClock,
   MINUTE_MS,
   QueueItemId,
+  ShowId,
   SECOND_MS,
 } from '@klockr/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -54,6 +55,10 @@ describe('executeTimerCommand', () => {
       events,
       idempotency: new InMemoryIdempotencyStore(),
       authorizer: allowAllAuthorizer,
+      locator: {
+        showIdOfItem: (id) => Promise.resolve(id === itemId ? ShowId('show-1') : null),
+        showIdOfBoard: () => Promise.resolve(null),
+      },
     };
     const created = createTimer({ mode: 'countdown', durationMs: 10 * MINUTE_MS });
     if (!created.ok) throw new Error('setup');

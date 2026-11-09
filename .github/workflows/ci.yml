@@ -46,3 +46,16 @@ jobs:
       - name: Database migrations + integration tests
         run: pnpm db:migrate && pnpm test:integration
       - run: pnpm build
+      - name: Install Playwright browser
+        run: pnpm --filter @klockr/web exec playwright install --with-deps chromium
+      - name: E2E (Quick Timer, realtime, reconnect)
+        run: pnpm test:e2e
+      - name: Upload E2E artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            apps/web/test-results
+            apps/web/playwright-report
+          retention-days: 7
