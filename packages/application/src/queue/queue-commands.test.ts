@@ -47,7 +47,7 @@ describe('Queue commands (application layer)', () => {
     deps = {
       clock,
       shows: store,
-      queues: store,
+      state: store,
       timers: store,
       grants: store,
       audit: store,
@@ -150,11 +150,11 @@ describe('Queue commands (application layer)', () => {
       expect(!deleteCurrent.ok && deleteCurrent.error.code).toBe('invalid_transition');
     });
 
-    it('publishes one queue.changed event per accepted change and records activity', async () => {
+    it('publishes one show.changed event per accepted change and records activity', async () => {
       clock.advance(5 * SECOND_MS);
       await add('Speaker A', MINUTE_MS);
       const last = events.events.at(-1);
-      expect(last?.type).toBe('queue.changed');
+      expect(last?.type).toBe('show.changed');
       expect(last?.showId).toBe(showId);
       expect(store.shows.get(showId)?.lastActiveAt).toBe(clock.now());
     });
@@ -282,9 +282,9 @@ describe('Queue commands (application layer)', () => {
     it('re-evaluates against fresh state when a timer transition races the save', async () => {
       await timer('timer.start', timerItem);
       // Simulate a timer transition committed between load and save of the END command.
-      const realLoad = store.loadQueue.bind(store);
+      const realLoad = store.loadShowAggregate.bind(store);
       let raced = false;
-      store.loadQueue = async (id) => {
+      store.loadShowAggregate = async (id) => {
         const loaded = await realLoad(id);
         if (!raced) {
           raced = true;

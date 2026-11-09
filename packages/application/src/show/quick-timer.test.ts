@@ -57,7 +57,7 @@ describe('Quick Timer use cases', () => {
       clock,
       shows: store,
       timers: store,
-      queues: store,
+      state: store,
       grants: store,
       audit: store,
       locator: store,
@@ -82,8 +82,8 @@ describe('Quick Timer use cases', () => {
       owner: { actor: owner.actor } satisfies CommandContext,
       board: { actor: board.actor } satisfies CommandContext,
       boardGrant: board.grant,
-      itemId: state.value.queue.items[0]?.id ?? '',
-      boardId: state.value.board.id,
+      itemId: state.value.queues[0]?.items[0]?.id ?? '',
+      boardId: state.value.boards[0]?.id ?? '',
     };
   }
 
@@ -145,7 +145,7 @@ describe('Quick Timer use cases', () => {
     it('board can read only its Board projection and can never mutate', async () => {
       const show = await newShow();
       const boardState = await getBoardState(BoardId(show.boardId), show.board, deps);
-      expect(boardState.ok && boardState.value.timer?.status).toBe('idle');
+      expect(boardState.ok && boardState.value.queues[0]?.timers[0]?.status).toBe('idle');
 
       for (const type of ['timer.start', 'timer.pause', 'timer.stop'] as const) {
         const result = await runShowTimerCommand(
@@ -268,7 +268,7 @@ describe('Quick Timer use cases', () => {
       );
       expect(retry).toEqual(first);
       // One commit: one timer transition plus the Queue projection it changes.
-      expect(events.events.map((e) => e.type)).toEqual(['timer.transitioned', 'queue.changed']);
+      expect(events.events.map((e) => e.type)).toEqual(['timer.transitioned', 'show.changed']);
     });
   });
 });

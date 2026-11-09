@@ -182,7 +182,8 @@ export function isViewCommand(command: ShowCommand): command is ViewCommand {
 /** The Queue a single-Queue command addresses (explicit, via its item/group, or Primary). */
 export function queueIdFor(show: ShowAggregate, command: ViewCommand): string | undefined {
   const byItem = (id: string) => queueOfItem(show, id)?.queue.id;
-  const byGroup = (id: string) => show.queues.find((q) => q.groups.some((g) => g.id === id))?.queue.id;
+  const byGroup = (id: string) =>
+    show.queues.find((q) => q.groups.some((g) => g.id === id))?.queue.id;
   switch (command.type) {
     case 'item.add':
     case 'group.add':
@@ -501,7 +502,11 @@ export function applyShowCommand(
       const r = addQueue(show, command.payload, ctx);
       if (!r.ok) return { ok: false, error: fromError(r.error) };
       return done(r.value.show, r.value.queueId, [
-        { action: 'queue.create', resource: { kind: 'queue', id: r.value.queueId }, details: { name: command.payload.name } },
+        {
+          action: 'queue.create',
+          resource: { kind: 'queue', id: r.value.queueId },
+          details: { name: command.payload.name },
+        },
       ]);
     }
     case 'queue.update': {
@@ -515,23 +520,43 @@ export function applyShowCommand(
     case 'queue.setPrimary': {
       const r = setPrimaryQueue(show, command.payload.queueId);
       if (!r.ok) return { ok: false, error: fromError(r.error) };
-      return done(r.value, null, r.value === show ? [] : [
-        { action: 'queue.set_primary', resource: { kind: 'queue', id: command.payload.queueId }, details: { before: show.primaryQueueId } },
-      ]);
+      return done(
+        r.value,
+        null,
+        r.value === show
+          ? []
+          : [
+              {
+                action: 'queue.set_primary',
+                resource: { kind: 'queue', id: command.payload.queueId },
+                details: { before: show.primaryQueueId },
+              },
+            ],
+      );
     }
     case 'queue.delete': {
-      const name = show.queues.find((q) => q.queue.id === command.payload.queueId)?.queue.name ?? null;
+      const name =
+        show.queues.find((q) => q.queue.id === command.payload.queueId)?.queue.name ?? null;
       const r = deleteQueue(show, command.payload.queueId, ctx.now);
       if (!r.ok) return { ok: false, error: fromError(r.error) };
       return done(r.value, null, [
-        { action: 'queue.delete', resource: { kind: 'queue', id: command.payload.queueId }, details: { name } },
+        {
+          action: 'queue.delete',
+          resource: { kind: 'queue', id: command.payload.queueId },
+          details: { name },
+        },
       ]);
     }
     case 'item.moveToQueue': {
       const { queueItemId, queueId, groupId, index } = command.payload;
       const r = moveItemToQueue(
         show,
-        { itemId: queueItemId, queueId, groupId: groupId === null ? null : GroupId(groupId), index },
+        {
+          itemId: queueItemId,
+          queueId,
+          groupId: groupId === null ? null : GroupId(groupId),
+          index,
+        },
         ctx,
       );
       return r.ok ? done(r.value) : { ok: false, error: fromError(r.error) };
@@ -540,21 +565,39 @@ export function applyShowCommand(
       const r = createRelation(show, command.payload, ctx);
       if (!r.ok) return { ok: false, error: fromError(r.error) };
       return done(r.value.show, r.value.relationId, [
-        { action: 'relation.create', resource: { kind: 'relation', id: r.value.relationId }, details: { ...command.payload } },
+        {
+          action: 'relation.create',
+          resource: { kind: 'relation', id: r.value.relationId },
+          details: { ...command.payload },
+        },
       ]);
     }
     case 'relation.update': {
       const r = updateRelation(show, command.payload, ctx);
       if (!r.ok) return { ok: false, error: fromError(r.error) };
-      return done(r.value, null, r.value === show ? [] : [
-        { action: 'relation.update', resource: { kind: 'relation', id: command.payload.relationId }, details: { ...command.payload } },
-      ]);
+      return done(
+        r.value,
+        null,
+        r.value === show
+          ? []
+          : [
+              {
+                action: 'relation.update',
+                resource: { kind: 'relation', id: command.payload.relationId },
+                details: { ...command.payload },
+              },
+            ],
+      );
     }
     case 'relation.delete': {
       const r = deleteRelation(show, command.payload.relationId);
       if (!r.ok) return { ok: false, error: fromError(r.error) };
       return done(r.value, null, [
-        { action: 'relation.delete', resource: { kind: 'relation', id: command.payload.relationId }, details: {} },
+        {
+          action: 'relation.delete',
+          resource: { kind: 'relation', id: command.payload.relationId },
+          details: {},
+        },
       ]);
     }
     case 'suggestion.accept': {
@@ -581,7 +624,8 @@ export function applyShowCommand(
         updatedAt: ctx.now,
         revision: 0,
       };
-      if (show.boards.length >= 50) return { ok: false, error: { code: 'validation_failed', message: 'too many boards' } };
+      if (show.boards.length >= 50)
+        return { ok: false, error: { code: 'validation_failed', message: 'too many boards' } };
       return done(commitShow({ ...show, boards: [...show.boards, board] }), board.id);
     }
     case 'board.update': {
@@ -591,19 +635,45 @@ export function applyShowCommand(
       const candidate: Board = {
         ...existing,
         ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)),
-        ...(sources ? { sources: sources.kind === 'primary' ? { kind: 'primary' } : { kind: 'queues', queueIds: sources.queueIds.map(QueueId) } } : {}),
-        presentation: { ...existing.presentation, ...Object.fromEntries(Object.entries(presentation ?? {}).filter(([, v]) => v !== undefined)) },
+        ...(sources
+          ? {
+              sources:
+                sources.kind === 'primary'
+                  ? { kind: 'primary' }
+                  : { kind: 'queues', queueIds: sources.queueIds.map(QueueId) },
+            }
+          : {}),
+        presentation: {
+          ...existing.presentation,
+          ...Object.fromEntries(
+            Object.entries(presentation ?? {}).filter(([, v]) => v !== undefined),
+          ),
+        },
       };
-      const valid = validateBoard(candidate, show.queues.map((q) => q.queue.id));
-      if (!valid.ok) return { ok: false, error: { code: 'validation_failed', message: valid.error } };
+      const valid = validateBoard(
+        candidate,
+        show.queues.map((q) => q.queue.id),
+      );
+      if (!valid.ok)
+        return { ok: false, error: { code: 'validation_failed', message: valid.error } };
       const updated = { ...valid.value, updatedAt: ctx.now, revision: existing.revision + 1 };
-      return done(commitShow({ ...show, boards: show.boards.map((b) => (b.id === existing.id ? updated : b)) }));
+      return done(
+        commitShow({
+          ...show,
+          boards: show.boards.map((b) => (b.id === existing.id ? updated : b)),
+        }),
+      );
     }
     case 'board.delete': {
       if (!show.boards.some((b) => b.id === command.payload.boardId)) {
         return { ok: false, error: { code: 'not_found', message: 'board not found' } };
       }
-      return done(commitShow({ ...show, boards: show.boards.filter((b) => b.id !== command.payload.boardId) }));
+      return done(
+        commitShow({
+          ...show,
+          boards: show.boards.filter((b) => b.id !== command.payload.boardId),
+        }),
+      );
     }
     case 'message.send': {
       const boardIds = (command.payload.boardIds ?? []).map(BoardId);
@@ -619,8 +689,12 @@ export function applyShowCommand(
         ttlMs: command.payload.ttlMs ?? null,
         now: ctx.now,
       });
-      if (!created.ok) return { ok: false, error: { code: 'validation_failed', message: created.error } };
-      return done(commitShow({ ...show, messages: [...show.messages, created.value] }), created.value.id);
+      if (!created.ok)
+        return { ok: false, error: { code: 'validation_failed', message: created.error } };
+      return done(
+        commitShow({ ...show, messages: [...show.messages, created.value] }),
+        created.value.id,
+      );
     }
     case 'message.clear': {
       if (!show.messages.some((m) => m.id === command.payload.messageId)) {
@@ -629,7 +703,9 @@ export function applyShowCommand(
       return done(
         commitShow({
           ...show,
-          messages: show.messages.map((m) => (m.id === command.payload.messageId ? { ...m, clearedAt: ctx.now } : m)),
+          messages: show.messages.map((m) =>
+            m.id === command.payload.messageId ? { ...m, clearedAt: ctx.now } : m,
+          ),
         }),
       );
     }
@@ -669,7 +745,8 @@ export async function executeShowCommand(
           const queueId = queueIdFor(prev, command);
           affectedQueue = queueId;
           const view = queueId ? queueView(prev, queueId) : null;
-          if (!view) return { ok: false, error: { code: 'not_found', message: 'Queue or item not found' } };
+          if (!view)
+            return { ok: false, error: { code: 'not_found', message: 'Queue or item not found' } };
           const applied = applyQueueCommand(view, command, ctx);
           if (!applied.ok) return { ok: false, error: fromError(applied.error) };
           const next = withQueueView(prev, applied.value.aggregate);
@@ -682,7 +759,11 @@ export async function executeShowCommand(
         const applied = applyShowCommand(prev, command, ctx);
         if (!applied.ok) return applied;
         if (command.type === 'item.moveToQueue') affectedQueue = command.payload.queueId;
-        return ok({ show: applied.value.show, value: applied.value.createdId, audit: applied.value.audit });
+        return ok({
+          show: applied.value.show,
+          value: applied.value.createdId,
+          audit: applied.value.audit,
+        });
       },
     },
     context,

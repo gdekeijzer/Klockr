@@ -187,7 +187,11 @@ function growsAfter(item: QueueItem | undefined): EpochMs | null {
  * management data. Hidden items still take their time in the schedule (projected values are
  * computed on the full Show) but their content never leaves the server.
  */
-export function toBoardSnapshot(board: Board, show: ShowAggregate, now: EpochMs): BoardStateSnapshot {
+export function toBoardSnapshot(
+  board: Board,
+  show: ShowAggregate,
+  now: EpochMs,
+): BoardStateSnapshot {
   const schedule = calculateShowSchedule(show, now);
   const audience = board.audience;
   const enabled = new Set(board.components.filter((c) => c.enabled).map((c) => c.kind));
@@ -251,8 +255,11 @@ export function toBoardSnapshot(board: Board, show: ShowAggregate, now: EpochMs)
         next: after[0] ? toItem(after[0]) : null,
         upcoming: after.slice(0, upcomingCount).map(toItem),
         timers,
-        warning: resolveItemThresholds(show.showWarning, view.queue.warning, current?.warning ?? null)
-          .rule,
+        warning: resolveItemThresholds(
+          show.showWarning,
+          view.queue.warning,
+          current?.warning ?? null,
+        ).rule,
         offsetMs: projection?.showOffsetMs ?? null,
         growsAfter: growsAfter(current),
         toleranceMs: show.showSchedule.toleranceMs,

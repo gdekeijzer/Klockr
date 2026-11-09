@@ -12,7 +12,10 @@ export function lockTargetsFor(
   command: QueueCommandDto | BoardCommandDto,
 ): LockTarget[] {
   const showTarget: LockTarget = { kind: 'show', id: show.showId };
-  const queue = (id: string | undefined): LockTarget => ({ kind: 'queue', id: id ?? show.primaryQueueId });
+  const queue = (id: string | undefined): LockTarget => ({
+    kind: 'queue',
+    id: id ?? show.primaryQueueId,
+  });
   const item = (id: string): LockTarget => ({ kind: 'item', id });
   const group = (id: string): LockTarget => ({ kind: 'group', id });
   const containerOf = (itemId: string): LockTarget => {
@@ -26,7 +29,9 @@ export function lockTargetsFor(
   };
   switch (command.type) {
     case 'item.add':
-      return [command.payload.groupId ? group(command.payload.groupId) : queue(command.payload.queueId)];
+      return [
+        command.payload.groupId ? group(command.payload.groupId) : queue(command.payload.queueId),
+      ];
     case 'item.update':
     case 'item.delete':
     case 'item.setActive':
@@ -39,7 +44,9 @@ export function lockTargetsFor(
     case 'item.move':
       return [
         item(command.payload.queueItemId),
-        command.payload.groupId ? group(command.payload.groupId) : containerOf(command.payload.queueItemId),
+        command.payload.groupId
+          ? group(command.payload.groupId)
+          : containerOf(command.payload.queueItemId),
       ];
     case 'item.moveToQueue':
       return [
