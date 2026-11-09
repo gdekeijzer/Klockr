@@ -1,4 +1,4 @@
-import type { GroupId, QueueItemId } from '../ids';
+import type { GroupId } from '../ids';
 import { applyLayout, layoutOf } from '../queue/order';
 import { ok } from '../result';
 import type { EpochMs } from '../time';
@@ -81,7 +81,7 @@ export function moveItemToQueue(
     revision: item.revision + 1,
   };
   const targetLayout = [...layoutOf(targetView)];
-  const id = item.id as QueueItemId;
+  const id = item.id;
   if (input.groupId === null) {
     targetLayout.splice(Math.max(0, Math.min(targetLayout.length, input.index)), 0, {
       kind: 'item',

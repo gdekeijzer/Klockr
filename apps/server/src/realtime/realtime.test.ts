@@ -48,11 +48,12 @@ describe('realtime', () => {
     const snapshot = await nextEvent(board, 'board.snapshot');
     expect(snapshot.queues[0]?.timers[0]).toMatchObject({ status: 'idle', revision: 0 });
 
-    const update = nextEvent(board, 'timer.state');
+    // Boards receive their timers through their own scoped projection, one per commit.
+    const update = nextEvent(board, 'board.snapshot');
     await send(server, show, 'timer.start');
-    const started = await update;
+    const started = (await update).queues[0]?.timers[0];
     expect(started).toMatchObject({ status: 'running', revision: 1 });
-    expect(started.serverTime).toBeGreaterThanOrEqual(started.startedAt ?? 0);
+    expect(started?.serverTime).toBeGreaterThanOrEqual(started?.startedAt ?? 0);
   });
 
   it('operators connect with the owner cookie and receive the management snapshot', async () => {
@@ -85,6 +86,7 @@ describe('realtime', () => {
     const board = server.connect({ role: 'board', boardShareToken: show.boardShareToken });
     await nextEvent(board, 'board.snapshot');
     const received: unknown[] = [];
+    board.on('board.snapshot', (t) => received.push(t));
     board.on('timer.state', (t) => received.push(t));
     await send(server, show, 'timer.start');
     // Round-trip a clock ping: everything the server sent before the ack has arrived.

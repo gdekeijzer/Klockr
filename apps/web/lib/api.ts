@@ -4,7 +4,9 @@ import type {
   CreateQuickTimerResponse,
   ErrorResponse,
   QueueCommandDto,
-  QueueCommandResponse,
+  ShowCommandResponse,
+  BoardCommandDto,
+  BoardStateSnapshot,
   TimerCommandDto,
   TimerSnapshot,
 } from '@klockr/contracts';
@@ -59,8 +61,17 @@ export function createQuickTimer(durationMs: number): Promise<CreateQuickTimerRe
   });
 }
 
-export function createBoardShare(showId: string): Promise<BoardShareResponse> {
-  return request(`/shows/${showId}/board-shares`, { method: 'POST', body: '{}' });
+/** New read-only share credential for one Board (default: the Show's first Board). */
+export function createBoardShare(showId: string, boardId?: string): Promise<BoardShareResponse> {
+  return request(`/shows/${showId}/board-shares`, {
+    method: 'POST',
+    body: JSON.stringify(boardId ? { boardId } : {}),
+  });
+}
+
+/** Scoped Board projection for the management preview (same data a Board token receives). */
+export function fetchBoardPreview(showId: string, boardId: string): Promise<BoardStateSnapshot> {
+  return request<BoardStateSnapshot>(`/shows/${showId}/boards/${boardId}/preview`);
 }
 
 type CommandBody = Omit<TimerCommandDto, 'commandId' | 'idempotencyKey'>;
@@ -82,8 +93,11 @@ export async function sendTimerCommand(
   return result.timer;
 }
 
-/** Body of a Queue command without the envelope fields the client generates. */
-export type QueueCommandBody = DistributiveOmit<QueueCommandDto, 'commandId' | 'idempotencyKey'>;
+/** Body of a Show command (Queue, relation, suggestion, Board, Message) without envelope ids. */
+export type QueueCommandBody = DistributiveOmit<
+  QueueCommandDto | BoardCommandDto,
+  'commandId' | 'idempotencyKey'
+>;
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 /**
@@ -93,9 +107,9 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
 export async function sendQueueCommand(
   showId: string,
   command: QueueCommandBody,
-): Promise<QueueCommandResponse> {
+): Promise<ShowCommandResponse> {
   const commandId = crypto.randomUUID();
-  return request<QueueCommandResponse>(`/shows/${showId}/commands`, {
+  return request<ShowCommandResponse>(`/shows/${showId}/commands`, {
     method: 'POST',
     body: JSON.stringify({ ...command, commandId, idempotencyKey: commandId }),
   });

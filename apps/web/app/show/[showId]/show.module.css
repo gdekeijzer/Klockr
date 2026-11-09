@@ -475,3 +475,88 @@
 .adjust .buttons {
   flex-wrap: nowrap;
 }
+
+/* --- M4: peer Queues, suggestions, messages ------------------------------------------------ */
+
+.queueTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--k-spacing-1);
+  padding: var(--k-spacing-2) var(--k-spacing-6);
+  border-bottom: 1px solid var(--k-border-subtle);
+}
+
+.queueTab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-spacing-2);
+  min-height: 40px;
+  padding: 0 var(--k-spacing-3);
+  background: var(--k-background-control);
+  border: 1px solid var(--k-border-subtle);
+  border-radius: var(--k-radius-control);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Selected Queue = blue UI selection (never a state colour). */
+.queueTab[aria-pressed='true'] {
+  outline: 2px solid var(--k-accent-blue);
+  outline-offset: -2px;
+}
+
+.runningDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--k-state-ok);
+}
+
+.suggestionBadge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--k-accent-blue-strong);
+}
+
+/* Suggested follow: clear, not shouting — informational blue, dashed edge. */
+.suggestionBanner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-spacing-4);
+  margin: var(--k-spacing-3) var(--k-spacing-4) 0;
+  padding: var(--k-spacing-3) var(--k-spacing-4);
+  border: 1px dashed var(--k-accent-blue);
+  border-radius: var(--k-radius-panel);
+  background: var(--k-background-surface);
+}
+
+.goButton {
+  min-width: 96px;
+  border: 2px solid var(--k-accent-blue);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.messageForm {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--k-spacing-2);
+}
+
+.audiences {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--k-spacing-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-spacing-1);
+  color: var(--k-text-secondary);
+}

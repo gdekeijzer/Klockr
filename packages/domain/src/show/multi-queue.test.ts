@@ -357,10 +357,16 @@ describe('cross-Queue relations', () => {
         { sourceItemId: id('qa'), targetItemId: id('mic'), offsetMs: 0, preserveOffset: true },
         ctx(),
       ),
-    ).toMatchObject({
-      ok: false,
-      error: { reason: expect.stringContaining('one timing relation') },
-    });
+    ).toMatchObject({ ok: false });
+    expect(
+      JSON.stringify(
+        createRelation(
+          show,
+          { sourceItemId: id('qa'), targetItemId: id('mic'), offsetMs: 0, preserveOffset: true },
+          ctx(),
+        ),
+      ),
+    ).toContain('one timing relation');
     // mic -> Keynote would close the loop Keynote -> mic.
     expect(
       createRelation(
@@ -373,7 +379,21 @@ describe('cross-Queue relations', () => {
         },
         ctx(),
       ),
-    ).toMatchObject({ ok: false, error: { reason: expect.stringContaining('cycle') } });
+    ).toMatchObject({ ok: false });
+    expect(
+      JSON.stringify(
+        createRelation(
+          show,
+          {
+            sourceItemId: id('mic'),
+            targetItemId: id('keynote'),
+            offsetMs: 0,
+            preserveOffset: false,
+          },
+          ctx(),
+        ),
+      ),
+    ).toContain('cycle');
     // Through the queue order: Q&A mics comes after mic; Q&A mics -> Opening is a cycle via Keynote.
     expect(
       createRelation(

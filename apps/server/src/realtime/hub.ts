@@ -26,7 +26,7 @@ export interface HubSources {
 
 /**
  * Bridges committed application events to realtime clients. Never sends ticks:
- * - timer transition -> one `timer.state` to the Show's management clients and Boards;
+ * - timer transition -> one `timer.state` to the Show's management clients;
  * - Show change -> `show.state` (authoritative management projection) to management clients and
  *   a freshly computed, server-side scoped `board.snapshot` to EACH Board of the Show (only its
  *   sources, audience-visible items, its messages).
@@ -49,7 +49,9 @@ export class RealtimeHub implements EventPublisher {
     const now = this.clock.now();
     switch (event.type) {
       case 'timer.transitioned':
-        io.to([operatorRoom(event.showId), boardsRoom(event.showId)]).emit(
+        // Boards get their timer data only through their scoped projection (sent with the
+        // `show.changed` of the same commit), never raw timers of Queues outside their sources.
+        io.to(operatorRoom(event.showId)).emit(
           realtimeEvents.timer,
           toTimerSnapshot(event.queueItemId, event.state, now),
         );

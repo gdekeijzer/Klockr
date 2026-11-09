@@ -363,7 +363,10 @@ export function showEffectiveLock(show: ShowAggregate, target: LockTarget): Effe
   return view ? effectiveLock(view, target) : null;
 }
 
-export function showFirstLock(show: ShowAggregate, targets: readonly LockTarget[]): EffectiveLock | null {
+export function showFirstLock(
+  show: ShowAggregate,
+  targets: readonly LockTarget[],
+): EffectiveLock | null {
   for (const target of targets) {
     const found = showEffectiveLock(show, target);
     if (found) return found;

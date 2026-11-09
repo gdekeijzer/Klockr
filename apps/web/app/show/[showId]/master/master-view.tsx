@@ -5,8 +5,14 @@ import type {
   LockTargetDto,
   QueueItemSnapshot,
   QueueSnapshot,
+  ShowStateSnapshot,
 } from '@klockr/contracts';
-import { effectiveLock, type ItemSchedule, type QueueAggregate } from '@klockr/domain';
+import {
+  effectiveLock,
+  showEffectiveLock,
+  type ItemSchedule,
+  type QueueAggregate,
+} from '@klockr/domain';
 import { formatClock, formatDuration, formatOffset, formatSpan } from '@klockr/ui';
 import { useState, type DragEvent } from 'react';
 import { ApiError, sendQueueCommand, type QueueCommandBody } from '../../../../lib/api';
@@ -21,9 +27,11 @@ import {
 } from '../../../../lib/queue-layout';
 import { LockIcon } from '../../../../components/LockIcon';
 import { ScheduleBar } from '../../../../components/ScheduleBar';
-import { aggregateFromSnapshot } from '../../../../lib/schedule-view';
+import { aggregateFromSnapshot, showAggregateFromSnapshot } from '../../../../lib/schedule-view';
 import { useShowRealtime } from '../../../../lib/use-realtime';
-import { useSchedule } from '../../../../lib/use-schedule';
+import { useShowSchedule } from '../../../../lib/use-schedule';
+import { MoveToQueue, QueuePanel, RelationsSection, VisibilitySection } from './relations-panel';
+import { Timeline } from './timeline';
 import { useServerNow } from '../../../../lib/use-server-now';
 import { ShowFrame } from '../show-frame';
 import styles from '../show.module.css';
@@ -63,7 +71,9 @@ interface Blocked {
 export function MasterView({ showId }: { showId: string }) {
   const rt = useShowRealtime(showId);
   const now = useServerNow(rt.offsetMs, 1_000);
-  const schedule = useSchedule(rt.queue, rt.timers, now);
+  const showSchedule = useShowSchedule(rt.state, rt.timers, now);
+  const [selectedQueue, setSelectedQueue] = useState<string | null>(null);
+  const [view, setView] = useState<'list' | 'timeline'>('list');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [blocked, setBlocked] = useState<Blocked | null>(null);
@@ -72,7 +82,11 @@ export function MasterView({ showId }: { showId: string }) {
   const [dragged, setDragged] = useState<Dragged | null>(null);
   const [dropKey, setDropKey] = useState<string | null>(null);
   const live = rt.status === 'connected';
-  const queue = rt.queue;
+  const queue =
+    rt.state?.queues.find((q) => q.id === selectedQueue) ??
+    rt.state?.queues.find((q) => q.isPrimary) ??
+    null;
+  const schedule = queue ? (showSchedule?.forQueue(queue.id) ?? null) : null;
   const disabled = !live || pending;
 
   async function run(body: QueueCommandBody): Promise<string | null> {
@@ -81,7 +95,7 @@ export function MasterView({ showId }: { showId: string }) {
     setError(null);
     try {
       const result = await sendQueueCommand(showId, body);
-      rt.applyQueue(result.queue);
+      rt.applyState(result.state);
       setBlocked(null);
       return result.createdId;
     } catch (e) {
@@ -144,7 +158,8 @@ export function MasterView({ showId }: { showId: string }) {
   const selectedGroup =
     selection?.kind === 'group' ? queue?.groups.find((g) => g.id === selection.id) : undefined;
   const order = new Map(queue?.items.map((item, index) => [item.id, index + 1]));
-  const aggregate: QueueAggregate | null = queue ? aggregateFromSnapshot(queue, rt.timers) : null;
+  const aggregate: QueueAggregate | null =
+    queue && rt.state ? aggregateFromSnapshot(rt.state, queue.id, rt.timers) : null;
   const scheduleOf = new Map<string, ItemSchedule>(
     schedule?.projection.items.map((i) => [i.id, i]) ?? [],
   );
@@ -421,18 +436,56 @@ export function MasterView({ showId }: { showId: string }) {
     <ShowFrame showId={showId} view="master" rt={rt} now={now}>
       {queue && schedule && <ScheduleBar queue={queue} schedule={schedule} />}
       <main className={editor.masterGrid}>
-        {queue && aggregate && (
+        {queue && aggregate && rt.state && (
           <StructureTree
+            state={rt.state}
             queue={queue}
             aggregate={aggregate}
             title={rt.show?.title ?? 'Show'}
             selection={selection}
-            onSelect={setSelection}
+            disabled={disabled}
+            onSelect={(next) => {
+              if (next?.kind === 'queue') setSelectedQueue(next.id);
+              setSelection(next);
+            }}
+            onCommand={(body) => {
+              void run(body).then((id) => {
+                if (id && body.type === 'queue.create') {
+                  setSelectedQueue(id);
+                  setSelection({ kind: 'queue', id });
+                }
+              });
+            }}
           />
         )}
         <section className={styles.panel} aria-label="Program queue">
           <div className={styles.panelHead}>
-            <span className="label">Program queue</span>
+            <span className="label" data-testid="master-queue-name">
+              {queue?.isPrimary ? '★ ' : ''}
+              {queue?.name ?? 'Queue'}
+            </span>
+            <div className={styles.buttons} role="group" aria-label="View">
+              <button
+                type="button"
+                className={`${styles.button} ${styles.small}`}
+                aria-pressed={view === 'list'}
+                onClick={() => {
+                  setView('list');
+                }}
+              >
+                List
+              </button>
+              <button
+                type="button"
+                className={`${styles.button} ${styles.small}`}
+                aria-pressed={view === 'timeline'}
+                onClick={() => {
+                  setView('timeline');
+                }}
+              >
+                Timeline
+              </button>
+            </div>
             {queue && (
               <span className={`${styles.muted} mono`}>
                 {queue.items.length} items · rev {queue.revision}
@@ -450,7 +503,11 @@ export function MasterView({ showId }: { showId: string }) {
                 onClick={() => {
                   void run({
                     type: 'item.add',
-                    payload: { title: preset.title, durationMs: preset.durationMs },
+                    payload: {
+                      title: preset.title,
+                      durationMs: preset.durationMs,
+                      ...(queue ? { queueId: queue.id } : {}),
+                    },
                   }).then((id) => {
                     if (id) setSelection({ kind: 'item', id });
                   });
@@ -465,7 +522,10 @@ export function MasterView({ showId }: { showId: string }) {
               disabled={disabled}
               aria-label="Add Group"
               onClick={() => {
-                void run({ type: 'group.add', payload: { title: 'Group' } }).then((id) => {
+                void run({
+                  type: 'group.add',
+                  payload: { title: 'Group', ...(queue ? { queueId: queue.id } : {}) },
+                }).then((id) => {
                   if (id) setSelection({ kind: 'group', id });
                 });
               }}
@@ -491,7 +551,27 @@ export function MasterView({ showId }: { showId: string }) {
               }}
             />
           )}
-          {queue ? (
+          {rt.state && (
+            <QueueOverview
+              state={rt.state}
+              selected={queue?.id ?? null}
+              onSelect={setSelectedQueue}
+            />
+          )}
+          {queue && rt.state && showSchedule && view === 'timeline' ? (
+            <Timeline
+              state={rt.state}
+              show={showAggregateFromSnapshot(rt.state, rt.timers)}
+              projection={showSchedule.show}
+              now={now}
+              selectedItem={selection?.kind === 'item' ? selection.id : null}
+              onSelect={(itemId) => {
+                const owner = rt.state?.queues.find((q) => q.items.some((i) => i.id === itemId));
+                if (owner) setSelectedQueue(owner.id);
+                setSelection({ kind: 'item', id: itemId });
+              }}
+            />
+          ) : queue ? (
             <>
               <div className={editor.columns} aria-hidden>
                 <span>#</span>
@@ -556,6 +636,26 @@ export function MasterView({ showId }: { showId: string }) {
                   onCommand={command}
                 />
               </section>
+              {rt.state && (
+                <section className={styles.panel} aria-label="Relations and visibility">
+                  <RelationsSection
+                    key={`relations:${selectedItem.id}`}
+                    item={selectedItem}
+                    state={rt.state}
+                    projection={showSchedule?.show}
+                    disabled={disabled}
+                    onCommand={command}
+                  />
+                  <VisibilitySection item={selectedItem} disabled={disabled} onCommand={command} />
+                  <MoveToQueue
+                    item={selectedItem}
+                    queue={queue}
+                    state={rt.state}
+                    disabled={disabled}
+                    onCommand={command}
+                  />
+                </section>
+              )}
             </>
           )}
           {selectedGroup && queue && aggregate && (
@@ -580,6 +680,15 @@ export function MasterView({ showId }: { showId: string }) {
                 />
               </section>
             </>
+          )}
+          {selection?.kind === 'queue' && queue && rt.state && (
+            <QueuePanel
+              key={`${queue.id}:${String(queue.revision)}`}
+              queue={queue}
+              state={rt.state}
+              disabled={disabled}
+              onCommand={command}
+            />
           )}
           {!selectedItem && !selectedGroup && queue && aggregate && (
             <>
@@ -1057,10 +1166,10 @@ function SettingsPanel(props: {
           disabled={disabled}
           testId="queue-warning"
           onSave={(warning) => {
-            onCommand({ type: 'queue.setWarning', payload: { warning } });
+            onCommand({ type: 'queue.setWarning', payload: { warning, queueId: queue.id } });
           }}
           onReset={() => {
-            onCommand({ type: 'queue.setWarning', payload: { warning: null } });
+            onCommand({ type: 'queue.setWarning', payload: { warning: null, queueId: queue.id } });
           }}
         />
       </div>
@@ -1068,17 +1177,67 @@ function SettingsPanel(props: {
   );
 }
 
-/** Left zone: Show -> Queue -> Groups -> Queue Items, with lock state and current marker. */
+/** Compact Current / Next / suggestion strip of every peer Queue. */
+function QueueOverview(props: {
+  state: ShowStateSnapshot;
+  selected: string | null;
+  onSelect: (queueId: string) => void;
+}) {
+  if (props.state.queues.length < 2) return null;
+  return (
+    <div className={editor.overview} data-testid="queue-overview">
+      {props.state.queues.map((q) => {
+        const current = q.items.find((i) => i.id === q.currentItemId);
+        const next = q.items.find((i) => i.id === q.nextItemId);
+        const suggestion = props.state.suggestions.find((s) => s.targetQueueId === q.id);
+        return (
+          <button
+            key={q.id}
+            type="button"
+            className={editor.overviewCell}
+            aria-pressed={q.id === props.selected}
+            data-testid="queue-overview-cell"
+            data-queue={q.name}
+            onClick={() => {
+              props.onSelect(q.id);
+            }}
+          >
+            <span className="label">
+              {q.isPrimary ? '★ ' : ''}
+              {q.name}
+            </span>
+            <strong data-testid="overview-current">{current?.title ?? '—'}</strong>
+            <span className={styles.rowSub}>Next: {next?.title ?? '—'}</span>
+            {suggestion && (
+              <span className={styles.suggestionBadge} data-testid="overview-suggestion">
+                SUGGESTED: {q.items.find((i) => i.id === suggestion.targetItemId)?.title}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Left zone: Show -> peer Queues (★ Primary, add, reorder) -> Groups -> Queue Items of the
+ * selected Queue, with lock state and current marker.
+ */
 function StructureTree(props: {
+  state: ShowStateSnapshot;
   queue: QueueSnapshot;
   aggregate: QueueAggregate;
   title: string;
   selection: Selection;
+  disabled: boolean;
   onSelect: (selection: Selection) => void;
+  onCommand: (body: QueueCommandBody) => void;
 }) {
-  const { queue, aggregate, selection, onSelect } = props;
+  const { state, queue, selection, onSelect } = props;
+  const show = showAggregateFromSnapshot(state, {});
   const lockMark = (target: LockTargetDto) =>
-    effectiveLock(aggregate, target) ? (
+    showEffectiveLock(show, target) ? (
       <span className={editor.locked} aria-label="locked">
         <LockIcon />
       </span>
@@ -1098,7 +1257,7 @@ function StructureTree(props: {
         data-selected={selection?.kind === kind && selection.id === id}
         aria-label={`Select ${kind} ${label}`}
         onClick={() => {
-          onSelect(kind === 'show' || kind === 'queue' ? { kind, id } : { kind, id });
+          onSelect({ kind, id });
         }}
       >
         <span className={editor.treeLabel}>{label}</span>
@@ -1111,27 +1270,113 @@ function StructureTree(props: {
     <nav className={styles.panel} aria-label="Structure" data-testid="structure-tree">
       <span className="label">Structure</span>
       <ul className={editor.tree}>
-        {node('show', queue.showId, props.title, 0)}
-        {node('queue', queue.id, queue.name, 1)}
-        {rowsOf(queue).flatMap((row) =>
-          row.kind === 'item'
-            ? [
-                node(
-                  'item',
-                  row.item.id,
-                  row.item.title,
-                  2,
-                  row.item.lifecycle === 'current' ? 'CURRENT' : undefined,
-                ),
-              ]
-            : [
-                node('group', row.group.id, row.group.title, 2),
-                ...row.items.map((i) =>
-                  node('item', i.id, i.title, 3, i.lifecycle === 'current' ? 'CURRENT' : undefined),
-                ),
-              ],
-        )}
+        {node('show', state.show.id, props.title, 0)}
+        {state.queues.map((q, index) => (
+          <li key={`queue-row:${q.id}`} className={editor.queueNode}>
+            <ul className={editor.tree}>
+              {node('queue', q.id, `${q.isPrimary ? '★ ' : ''}${q.name}`, 1)}
+            </ul>
+            <span className={styles.rowActions}>
+              <button
+                type="button"
+                className={`${styles.button} ${styles.small}`}
+                disabled={props.disabled || index === 0}
+                aria-label={`Move queue up: ${q.name}`}
+                onClick={() => {
+                  props.onCommand({
+                    type: 'queue.move',
+                    payload: { queueId: q.id, index: index - 1 },
+                  });
+                }}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className={`${styles.button} ${styles.small}`}
+                disabled={props.disabled || index === state.queues.length - 1}
+                aria-label={`Move queue down: ${q.name}`}
+                onClick={() => {
+                  props.onCommand({
+                    type: 'queue.move',
+                    payload: { queueId: q.id, index: index + 1 },
+                  });
+                }}
+              >
+                ↓
+              </button>
+            </span>
+            {q.id === queue.id && (
+              <ul className={editor.tree}>
+                {rowsOf(queue).flatMap((row) =>
+                  row.kind === 'item'
+                    ? [
+                        node(
+                          'item',
+                          row.item.id,
+                          row.item.title,
+                          2,
+                          row.item.lifecycle === 'current' ? 'CURRENT' : undefined,
+                        ),
+                      ]
+                    : [
+                        node('group', row.group.id, row.group.title, 2),
+                        ...row.items.map((i) =>
+                          node(
+                            'item',
+                            i.id,
+                            i.title,
+                            3,
+                            i.lifecycle === 'current' ? 'CURRENT' : undefined,
+                          ),
+                        ),
+                      ],
+                )}
+              </ul>
+            )}
+          </li>
+        ))}
       </ul>
+      <AddQueue disabled={props.disabled} onCommand={props.onCommand} />
+      <a className={styles.link} href={`/show/${state.show.id}/boards`} data-testid="boards-link">
+        Boards →
+      </a>
     </nav>
+  );
+}
+
+function AddQueue(props: { disabled: boolean; onCommand: (body: QueueCommandBody) => void }) {
+  const [name, setName] = useState('');
+  return (
+    <form
+      className={editor.addQueue}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!name.trim()) return;
+        props.onCommand({
+          type: 'queue.create',
+          payload: { name: name.trim(), discipline: name.trim() },
+        });
+        setName('');
+      }}
+    >
+      <input
+        className={styles.input}
+        value={name}
+        maxLength={60}
+        placeholder="New queue (e.g. Audio)"
+        aria-label="New queue name"
+        onChange={(e) => {
+          setName(e.target.value);
+        }}
+      />
+      <button
+        type="submit"
+        className={`${styles.button} ${styles.small}`}
+        disabled={props.disabled || !name.trim()}
+      >
+        + Queue
+      </button>
+    </form>
   );
 }

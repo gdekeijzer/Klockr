@@ -232,7 +232,7 @@ export function ShowSchedulePanel(props: {
           aria-label="Queue timing mode"
           onChange={(e) => {
             const mode = e.target.value === '' ? null : (e.target.value as 'strict' | 'sliding');
-            onCommand({ type: 'queue.setTimingMode', payload: { mode } });
+            onCommand({ type: 'queue.setTimingMode', payload: { mode, queueId: queue.id } });
           }}
         >
           <option value="">Inherit Show default ({s.timingMode})</option>

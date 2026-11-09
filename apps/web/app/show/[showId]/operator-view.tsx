@@ -21,7 +21,8 @@ import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Chip } from '../../../components/Chip';
 import { ProgressBar } from '../../../components/ProgressBar';
 import { ScheduleBar } from '../../../components/ScheduleBar';
-import { useSchedule } from '../../../lib/use-schedule';
+import { useShowSchedule } from '../../../lib/use-schedule';
+import { MessagePanel, OtherRunningTimers, QueueTabs, SuggestionBanner } from './live-panels';
 import {
   ApiError,
   createBoardShare,
@@ -54,11 +55,17 @@ const noSubscription = () => () => undefined;
 export function OperatorView({ showId }: { showId: string }) {
   const rt = useShowRealtime(showId);
   const now = useServerNow(rt.offsetMs);
-  const schedule = useSchedule(rt.queue, rt.timers, now);
+  const showSchedule = useShowSchedule(rt.state, rt.timers, now);
+  const [selectedQueue, setSelectedQueue] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const live = rt.status === 'connected';
-  const queue = rt.queue;
+  // Default operating context: the Primary Queue. Every peer Queue has its own Current/Next.
+  const queue =
+    rt.state?.queues.find((q) => q.id === selectedQueue) ??
+    rt.state?.queues.find((q) => q.isPrimary) ??
+    null;
+  const schedule = queue ? (showSchedule?.forQueue(queue.id) ?? null) : null;
 
   async function act(label: string, run: () => Promise<void>) {
     if (!live) return;
@@ -93,7 +100,7 @@ export function OperatorView({ showId }: { showId: string }) {
   const queueAction = (body: QueueCommandBody) =>
     act(body.type, async () => {
       const result = await sendQueueCommand(showId, body);
-      rt.applyQueue(result.queue);
+      rt.applyState(result.state);
     });
 
   const current = queue?.items.find((i) => i.id === queue.currentItemId) ?? null;
@@ -104,6 +111,22 @@ export function OperatorView({ showId }: { showId: string }) {
   return (
     <ShowFrame showId={showId} view="operator" rt={rt} now={now}>
       {queue && schedule && <ScheduleBar queue={queue} schedule={schedule} />}
+      {rt.state && queue && (
+        <QueueTabs
+          state={rt.state}
+          selected={queue.id}
+          timers={rt.timers}
+          onSelect={setSelectedQueue}
+        />
+      )}
+      {rt.state && queue && (
+        <SuggestionBanner
+          state={rt.state}
+          queue={queue}
+          disabled={disabled}
+          onCommand={(body) => void queueAction(body)}
+        />
+      )}
       <main className={styles.grid}>
         <div className={styles.column}>
           {queue ? (
@@ -154,6 +177,17 @@ export function OperatorView({ showId }: { showId: string }) {
               disabled={disabled}
               onQueue={(body) => void queueAction(body)}
               onStopTimer={(id) => void timerAction(id, { type: 'timer.stop' })}
+            />
+          )}
+          {rt.state && queue && (
+            <OtherRunningTimers state={rt.state} selected={queue.id} timers={rt.timers} now={now} />
+          )}
+          {rt.state && (
+            <MessagePanel
+              state={rt.state}
+              now={now}
+              disabled={disabled}
+              onCommand={(body) => void queueAction(body)}
             />
           )}
           <SharePanel showId={showId} disabled={!live} />

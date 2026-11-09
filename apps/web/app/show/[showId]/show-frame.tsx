@@ -14,7 +14,7 @@ import styles from './show.module.css';
  */
 export function ShowFrame(props: {
   showId: string;
-  view: 'operator' | 'master';
+  view: 'operator' | 'master' | 'boards';
   rt: ShowRealtime;
   now: number;
   children: ReactNode;
@@ -53,6 +53,13 @@ export function ShowFrame(props: {
             aria-current={view === 'master' ? 'page' : undefined}
           >
             Master
+          </Link>
+          <Link
+            className={styles.tab}
+            href={`/show/${showId}/boards`}
+            aria-current={view === 'boards' ? 'page' : undefined}
+          >
+            Boards
           </Link>
         </nav>
         <div className={styles.showName}>
