@@ -2,6 +2,8 @@
 
 ## M3 — 2026-11-10 — Scheduling + Master
 
+- review: M3 approved; OPEN_QUESTIONS #41 (Strict never projects an explicitly planned item earlier) and #42 (timer duration = planned duration; live adjustments never change it) resolved.
+
 - domain: schedule engine (`calculateSchedule`, `classifyOffset`) with Planned / Projected / Actual, Strict / Sliding, fixed anchors, recovery-to-anchor, soft scheduled start; schedule operations (`setItemSchedule`, `setQueueTimingMode`, `setShowSchedule`, `transitionItemTimer`); locks with inheritance (`effectiveLock`, `setLock`, `releaseLock`, `requestUnlock`); actual start/end recorded by START/current/END; capabilities `schedule.*`, `lock.*`, `audit.read`;
 - application: `mutateQueue` as the single aggregate mutation path for Queue AND timer commands (lock gate, audited Emergency Override, audit records in the same transaction); new commands `item.setSchedule`, `queue.setTimingMode`, `show.setSchedule`, `lock.set`, `lock.release`, `lock.requestUnlock`; `getAuditTrail`;
 - contracts: schedule/lock/audit DTOs, `override` envelope, error `locked`;

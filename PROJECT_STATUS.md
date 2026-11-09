@@ -2,7 +2,7 @@
 
 ## Phase
 
-**M3 complete (2026-11-10) — Scheduling + Master. Awaiting review before M4.** (Branch `feature/m3-scheduling-master`.)
+**M3 complete and approved (2026-11-10) — Scheduling + Master.** OPEN_QUESTIONS #41-42 resolved in the review. Workflow from now on: local checks → commit directly on `main` → push → verify CI on `main` (PRs only on explicit request).
 
 ## M3 delivered
 
@@ -151,7 +151,7 @@ OPEN_QUESTIONS #34-37 resolved in the review.
 
 ## Next milestone
 
-**M4 — Boards + multi-queue** (see `ROADMAP.md`). Start only on explicit instruction; review M3 and OPEN_QUESTIONS #38-42 first.
+**M4 — Boards + multi-queue** (see `ROADMAP.md`). Start only on explicit instruction; OPEN_QUESTIONS #38-40 remain open.
 
 ## Decisions that do not block M4
 

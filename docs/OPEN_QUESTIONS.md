@@ -81,10 +81,10 @@ Remaining:
 36. ~~Group collapse state~~ — **Resolved:** collapsed/expanded is local UI state per browser; it is not part of authoritative Show State and is not persisted.
 37. ~~"On previous END" in M2~~ — **Resolved:** `startMode = on_previous_end` belongs in M2 because END + NEXT may only start the next timer automatically when explicitly configured. It stays a plain Queue Item property; no extra object, type or hierarchy.
 
-## Raised during M3 (Scheduling + Master) — baseline implemented, confirm in review
+## Raised during M3 (Scheduling + Master) — #41-42 resolved in the M3 review; #38-40 open
 
 38. **Midnight.** Planned times are entered as HH:MM on one Show date in the Show timezone. Rundowns crossing midnight need a per-item date (not in the UI yet; the model stores absolute UTC instants, so this is a UI extension only).
 39. **Request Unlock delivery.** Requests are persisted, shown on the lock and audited, but there is no notification channel (and with only the anonymous owner the requester and the lock owner are the same person). Decide the delivery/UX once role links/accounts exist.
 40. **Who has `lock.override` without `lock.manage`?** The anonymous owner holds all lock capabilities. Override is fully permission-gated and audited (tested with a restricted actor), but a role that may override yet not unlock arrives only with role links/accounts.
-41. **Strict when running ahead.** Baseline: in Strict an item with an explicit planned start is never projected earlier than planned (the show waits for the plan); chained items and Sliding flow earlier. Confirm.
-42. **Planned duration of timed items.** Baseline: the configured timer duration is the planned duration (one value; changing it is a planning edit and audited). A separate planned duration next to the timer duration is not introduced.
+41. ~~Strict when running ahead~~ — **Resolved (2026-11-10, M3 review):** in STRICT a Queue Item with an explicit Planned start is never projected earlier than that Planned start; when the production runs ahead this creates buffer/waiting time before it. Planned never changes. SLIDING may move future Projected starts earlier.
+42. ~~Planned duration of timed items~~ — **Resolved (2026-11-10, M3 review):** for a Queue Item with a timer the configured timer duration is also its Planned duration. Live adjustments (+10, +30, -10, …) never change Planned duration; they only affect live/projected timing. A deliberate configuration edit of the timer duration is a planning edit and changes Planned duration (audited). Only items without a timer store a separate `plannedDurationMs`; timed items never have two competing duration values.
