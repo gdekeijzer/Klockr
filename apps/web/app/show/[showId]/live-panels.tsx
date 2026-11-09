@@ -137,8 +137,11 @@ export function OtherRunningTimers(props: {
       <ul className={styles.list}>
         {running.map(({ q, i, t }) => (
           <li key={i.id} className={styles.row} data-testid="other-running-row">
-            <span className={styles.rowIndex}>{q.name}</span>
-            <span className={styles.rowTitle}>{i.title}</span>
+            <span className={styles.rowIndex} />
+            <span className={styles.rowMain}>
+              <span className={styles.rowTitle}>{i.title}</span>
+              <span className={styles.rowSub}>{q.name}</span>
+            </span>
             <span className="mono">{formatTimer(deriveTimer(t, props.now))}</span>
             <span className={styles.tag} data-kind="running">
               {t.status === 'running' ? 'RUNNING' : 'PAUSED'}

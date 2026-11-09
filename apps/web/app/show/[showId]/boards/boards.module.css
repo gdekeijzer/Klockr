@@ -63,7 +63,7 @@
 
 .componentRow {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-columns: auto minmax(0, 1fr) 64px 64px auto;
   align-items: center;
   gap: var(--k-spacing-2);
   padding: 2px var(--k-spacing-2);

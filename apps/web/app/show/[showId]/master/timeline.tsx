@@ -120,7 +120,7 @@ export function Timeline(props: {
                             <span className={tl.blockMeta}>
                               {item.lifecycle === 'current' && 'CURRENT '}
                               {item.fixedAnchor && 'FIXED '}
-                              {(relation || relationsBySource.has(item.id)) && '⛓ '}
+                              {(relation || relationsBySource.has(item.id)) && 'LINK '}
                               {conflict && 'CONFLICT '}
                               {Math.abs(shift) > tolerance &&
                                 item.lifecycle !== 'completed' &&
@@ -144,8 +144,8 @@ export function Timeline(props: {
         </div>
       </div>
       <p className={styles.muted}>
-        Outline = planned · filled = projected · ⛓ = related across Queues · FIXED = fixed anchor ·
-        the axis stays put while the show runs.
+        Outline = planned · filled = projected · LINK = related across Queues · FIXED = fixed anchor
+        · the axis stays put while the show runs.
       </p>
     </div>
   );
