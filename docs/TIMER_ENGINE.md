@@ -64,6 +64,21 @@ Typical effective states:
 
 Thresholds can be expressed as absolute remaining duration or percentage where supported.
 
+### KLOCKR defaults (decision 2026-11-09)
+
+Percentage of the **original configured duration** (adjustments do not move the thresholds):
+
+| Phase | Condition |
+| --- | --- |
+| normal | remaining > 20 % |
+| warning | remaining <= 20 % |
+| critical | remaining <= 5 % |
+| overtime | remaining < 0 (always dominant over critical) |
+
+Examples: a 20:00 timer turns warning at 04:00 and critical at 01:00; 05:00 -> 01:00 / 00:15; 01:00 -> 00:12 / 00:03.
+
+Implemented as `DEFAULT_TIMER_THRESHOLDS` / `timerPhase()` in `packages/domain/src/timer/phase.ts`. M2 adds the inheritance `Show default -> Queue override -> Queue Item override`; absolute-time thresholds may be added later.
+
 The UI must show when an item uses an override instead of inherited values.
 
 ## Controls
@@ -174,4 +189,4 @@ Implementation rules (the first two confirmed in the M0 review, see decisions ab
 
 Display rounding is a presentation concern, implemented in `packages/ui` (`formatTimer`): countdown remaining is floored and overtime ceiled, so each displayed second lasts one second and the documented sequence `00:01 -> 00:00 -> +00:01` holds.
 
-Timer phase (`normal | warning | critical | overtime`) is derived by `timerPhase()` in the domain; thresholds are provisional (see `OPEN_QUESTIONS.md` #5). An idle timer is always `normal`.
+Timer phase (`normal | warning | critical | overtime`) is derived by `timerPhase()` in the domain. An idle timer is always `normal`.

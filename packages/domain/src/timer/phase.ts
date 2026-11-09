@@ -1,35 +1,42 @@
-import type { DurationMs } from '../time';
 import type { TimerView } from './timer';
 
 /** Visual/operational timer phase derived from a view; never persisted. */
 export type TimerPhase = 'normal' | 'warning' | 'critical' | 'overtime';
 
+/**
+ * Thresholds as a percentage of the ORIGINAL configured duration (adjustments do not move them).
+ * M2 adds Show -> Queue -> Queue Item inheritance; absolute-time thresholds may be added later.
+ */
 export interface TimerThresholds {
-  /** Remaining time at or below which the countdown is in warning. */
-  readonly warningMs: DurationMs;
-  /** Remaining time at or below which the countdown is critical. */
-  readonly criticalMs: DurationMs;
+  /** Warning when remaining <= this percentage of the configured duration. */
+  readonly warningPercent: number;
+  /** Critical when remaining <= this percentage of the configured duration. */
+  readonly criticalPercent: number;
+}
+
+/** KLOCKR defaults (decision 2026-11-09, OPEN_QUESTIONS #5): warning <= 20 %, critical <= 5 %. */
+export const DEFAULT_TIMER_THRESHOLDS: TimerThresholds = {
+  warningPercent: 20,
+  criticalPercent: 5,
+};
+
+/** remaining <= percent% of duration, in integer arithmetic (no floating-point edge errors). */
+function within(remainingMs: number, durationMs: number, percent: number): boolean {
+  return remainingMs * 100 <= durationMs * percent;
 }
 
 /**
- * PROVISIONAL default (OPEN_QUESTIONS #5 is still open): taken from the examples in
- * FUNCTIONAL_DESIGN.md ("Warning at 05:00 remaining, Critical at 01:00 remaining").
- * Show -> Queue -> Queue Item inheritance of thresholds arrives with M2.
+ * Overtime (remaining < 0) always dominates; then critical, then warning. An idle timer is
+ * always normal: it only shows its configured value and is not running out.
  */
-export const PROVISIONAL_DEFAULT_THRESHOLDS: TimerThresholds = {
-  warningMs: 5 * 60 * 1_000,
-  criticalMs: 60 * 1_000,
-};
-
 export function timerPhase(
   view: TimerView,
-  thresholds: TimerThresholds = PROVISIONAL_DEFAULT_THRESHOLDS,
+  thresholds: TimerThresholds = DEFAULT_TIMER_THRESHOLDS,
 ): TimerPhase {
   if (view.remainingMs === null) return 'normal';
   if (view.isOvertime) return 'overtime';
-  // An untouched idle timer is not "running out"; it only shows its configured value.
   if (view.status === 'idle') return 'normal';
-  if (view.remainingMs <= thresholds.criticalMs) return 'critical';
-  if (view.remainingMs <= thresholds.warningMs) return 'warning';
+  if (within(view.remainingMs, view.durationMs, thresholds.criticalPercent)) return 'critical';
+  if (within(view.remainingMs, view.durationMs, thresholds.warningPercent)) return 'warning';
   return 'normal';
 }

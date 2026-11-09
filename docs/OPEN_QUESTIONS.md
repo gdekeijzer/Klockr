@@ -11,7 +11,7 @@ These questions are deliberately deferred. Claude must not silently invent produ
 
 3. Reconfirm overtime adjustment semantics during UI prototype testing (`+30` at `+02:14` currently means `+02:44`).
 4. Exact default transport increments per screen/device preset.
-5. Default Quick Timer warning thresholds. **M1 uses a provisional default** taken from the FUNCTIONAL_DESIGN examples (warning at 05:00 remaining, critical at 01:00) — `PROVISIONAL_DEFAULT_THRESHOLDS` in `packages/domain/src/timer/phase.ts`. Consequence seen in M1: timers of 5 minutes or less are amber from their first second, and 1 minute or less red. Needs a product decision (e.g. percentage-based for short timers) before M2 inheritance.
+5. ~~Default Quick Timer warning thresholds~~ — **Resolved (2026-11-09):** KLOCKR defaults are percentage-based on the original configured duration: normal > 20 % remaining, warning <= 20 %, critical <= 5 %, overtime when remaining < 0 (overtime always dominates). Examples: 20:00 -> warning 04:00 / critical 01:00; 05:00 -> 01:00 / 00:15; 01:00 -> 00:12 / 00:03. Show -> Queue -> Queue Item inheritance follows in M2; absolute-time thresholds may be supported later. See `TIMER_ENGINE.md`.
 
 ## Scheduling
 

@@ -13,11 +13,11 @@
 - owner credential (HttpOnly cookie) and separate read-only board credential, both hashed at rest; capability-based grant authorization
 - PostgreSQL persistence (migration `0001_quick_timer`); Shows survive server restart (tested)
 - design tokens generated from `docs/design/tokens.json`; self-hosted Inter/Roboto Mono
-- tests: 138 unit/component tests (domain 49, contracts 10, application 25, ui 15, server 19, worker 2, web 18), 6 PostgreSQL integration tests, 4 Playwright E2E incl. server outage/restart
+- tests: 141 unit/component tests (domain 52, contracts 10, application 25, ui 15, server 19, worker 2, web 18), 6 PostgreSQL integration tests, 4 Playwright E2E incl. server outage/restart
 
 ## Known limitations after M1
 
-- Warning/critical thresholds are provisional (05:00 / 01:00) and make short timers amber/red from the start — `OPEN_QUESTIONS.md` #5 needs a decision.
+- Warning/critical thresholds use the KLOCKR defaults (20 % / 5 % of configured duration); they are not yet configurable (inheritance arrives in M2).
 - No END/NEXT, Queue editing, multiple items, Current/Next (M2).
 - Board links cannot be revoked from the UI yet; no PIN/expiry; no anonymous cleanup job; no "Claim Show".
 - The owner credential is bound to one browser; clearing cookies loses control of the Show (by design until accounts/claim in M6).

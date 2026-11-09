@@ -2,14 +2,14 @@
 
 ## M1 — 2026-11-09 — Anonymous Quick Timer vertical slice
 
-- domain: `createQuickTimerShow` (anonymous Show, Program Queue, timed Queue Item, Speaker Board, 7-day expiry), access grants with capability bundles and scope (`grantPermits`), derived `timerPhase` with provisional thresholds;
+- domain: `createQuickTimerShow` (anonymous Show, Program Queue, timed Queue Item, Speaker Board, 7-day expiry), access grants with capability bundles and scope (`grantPermits`), derived `timerPhase` with percentage-based KLOCKR defaults (warning <= 20 %, critical <= 5 % of configured duration; OPEN_QUESTIONS #5 resolved);
 - application: `createQuickTimer`, `createBoardShare`, `getShowState`, `getBoardState`, `runShowTimerCommand`, `timer.configure`, `authenticateToken`, `GrantAuthorizer`; events carry `showId`;
 - contracts: Show/Board snapshots, create/share DTOs, typed realtime event maps;
 - db: migration `0001_quick_timer` (shows, queues, queue_items, item_timers, boards, access_grants, idempotency_records) and PostgreSQL repositories (compare-and-set timer writes, durable idempotency);
 - server: HTTP API (`/api/v1/shows`, `/state`, `/commands`, `/board-shares`, `/board/state`), HttpOnly owner cookie, hashed type-prefixed tokens, rate limits, log redaction, Socket.IO realtime read channel with snapshot-on-connect, migrations shipped with the bundle;
 - web: New Quick Timer page, Operator View, Speaker Board, revision-gated realtime client with clock-offset estimation and offline projection; tokens generated from `docs/design/tokens.json`; self-hosted fonts;
-- tests: 138 unit/component, 6 PostgreSQL integration, 4 Playwright E2E (sync flow, server outage + restart, invalid board link, foreign browser); E2E added to CI;
-- docs: realtime/API/security/data-model implementation sections, development guide, provisional thresholds noted in OPEN_QUESTIONS #5.
+- tests: 141 unit/component, 6 PostgreSQL integration, 4 Playwright E2E (sync flow, server outage + restart, invalid board link, foreign browser); E2E added to CI;
+- docs: realtime/API/security/data-model implementation sections, development guide, default thresholds documented in TIMER_ENGINE.md.
 
 ## M0 review — 2026-11-09
 

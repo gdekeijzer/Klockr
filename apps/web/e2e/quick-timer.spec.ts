@@ -50,7 +50,7 @@ test('anonymous Quick Timer: operator and speaker board stay in sync', async ({
   await expect(page.getByTestId('timer-status')).toHaveText('RUNNING');
   await expect(boardTimer).toHaveAttribute('data-status', 'running');
   await expect.poll(() => boardSeconds(board)).toBeLessThan(600);
-  // Normal running timer (above the provisional 05:00 warning threshold) is white/light gray, not green.
+  // Normal running timer (more than 20 % remaining) is white/light gray, not green.
   await expect(boardTimer).toHaveCSS('color', 'rgb(245, 247, 250)');
 
   // Pause / resume.

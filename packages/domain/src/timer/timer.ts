@@ -196,6 +196,8 @@ export function adjustTimer(state: TimerState, deltaMs: DurationMs, now: EpochMs
 export interface TimerView {
   readonly mode: TimerMode;
   readonly status: TimerStatus;
+  /** The originally configured duration (adjustments excluded); basis for percentage thresholds. */
+  readonly durationMs: DurationMs;
   /** Effective run time on the timer timeline (pause excluded, adjustments included for count-up). */
   readonly elapsedMs: DurationMs;
   /** Countdown only: signed remaining time; negative means overtime. Null for count-up. */
@@ -220,6 +222,7 @@ export function deriveTimer(state: TimerState, at: EpochMs): TimerView {
     return {
       mode: state.mode,
       status: state.status,
+      durationMs: state.durationMs,
       elapsedMs,
       remainingMs: null,
       isOvertime: false,
@@ -234,6 +237,7 @@ export function deriveTimer(state: TimerState, at: EpochMs): TimerView {
   return {
     mode: state.mode,
     status: state.status,
+    durationMs: state.durationMs,
     elapsedMs: runMs,
     remainingMs,
     isOvertime,
