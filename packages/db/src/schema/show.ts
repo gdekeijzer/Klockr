@@ -47,6 +47,8 @@ export const shows = pgTable(
     scheduleDate: text('schedule_date'),
     toleranceMs: integer('tolerance_ms').notNull().default(30_000),
     severeBehindMs: integer('severe_behind_ms').notNull().default(300_000),
+    /** M4: compare-and-set revision of the whole Show aggregate. */
+    revision: integer('revision').notNull().default(0),
   },
   (t) => [
     check('shows_timing_mode_check', sql`${t.timingMode} in ('strict', 'sliding')`),
@@ -63,7 +65,11 @@ export const queues = pgTable(
       .notNull()
       .references(() => shows.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
-    purpose: text('purpose').notNull(),
+    /** Legacy M1-M3 column (always 'program'); superseded by `discipline` since M4. */
+    purpose: text('purpose').notNull().default('program'),
+    /** Optional discipline label (identifier, never a state colour). */
+    discipline: text('discipline'),
+    /** Display order among the Show's peer Queues. */
     position: integer('position').notNull(),
     /** Operational current position; `next` is derived, never stored. */
     currentItemId: uuid('current_item_id').references((): AnyPgColumn => queueItems.id, {
@@ -133,6 +139,13 @@ export const queueItems = pgTable(
     /** Actuals: written once by operational commands, never rewritten. */
     actualStartAt: tstz('actual_start_at'),
     actualEndAt: tstz('actual_end_at'),
+    /** Audiences that may see the item on Boards; NULL = everyone (backward compatible). */
+    visibility: text('visibility').array(),
+    /** Audiences the notes PROPERTY is published to; default none. */
+    notesAudiences: text('notes_audiences')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     createdAt: tstz('created_at').notNull().defaultNow(),
     updatedAt: tstz('updated_at').notNull().defaultNow(),
     revision: integer('revision').notNull().default(0),
@@ -183,9 +196,136 @@ export const boards = pgTable(
       .notNull()
       .references(() => shows.id, { onDelete: 'cascade' }),
     preset: text('preset').notNull(),
+    name: text('name').notNull().default('Speaker Board'),
+    /** Exactly one primary audience. */
+    audience: text('audience').notNull().default('stage'),
+    /** true = source is the Show's Primary Queue; false = `board_sources`. */
+    followPrimary: boolean('follow_primary').notNull().default(true),
+    /**
+     * Constrained component configuration (versioned presentation JSON, validated by the domain):
+     * [{ kind, enabled, size, upcoming }] in presentation order. Empty = preset defaults.
+     */
+    components: jsonb('components')
+      .$type<BoardComponentJson[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    presentation: jsonb('presentation')
+      .$type<{ lowLight: boolean; showTimes: boolean }>()
+      .notNull()
+      .default(sql`'{"lowLight":false,"showTimes":true}'::jsonb`),
     createdAt: tstz('created_at').notNull(),
+    updatedAt: tstz('updated_at').notNull().defaultNow(),
+    revision: integer('revision').notNull().default(0),
   },
-  (t) => [index('boards_show_idx').on(t.showId)],
+  (t) => [
+    index('boards_show_idx').on(t.showId),
+    check(
+      'boards_preset_check',
+      sql`${t.preset} in ('speaker_confidence', 'stage_manager', 'production', 'backstage', 'room_agenda', 'public_agenda', 'custom')`,
+    ),
+    check(
+      'boards_audience_check',
+      sql`${t.audience} in ('stage', 'production', 'backstage', 'public', 'broadcast')`,
+    ),
+  ],
+);
+
+export interface BoardComponentJson {
+  readonly kind: string;
+  readonly enabled: boolean;
+  readonly size: 'small' | 'medium' | 'large';
+  readonly upcoming: number;
+}
+
+/** Ordered source Queues of a Board that does not follow the Primary Queue. */
+export const boardSources = pgTable(
+  'board_sources',
+  {
+    boardId: uuid('board_id')
+      .notNull()
+      .references(() => boards.id, { onDelete: 'cascade' }),
+    queueId: uuid('queue_id')
+      .notNull()
+      .references(() => queues.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.boardId, t.queueId] })],
+);
+
+/** Cross-Queue relations (synchronization metadata, never ownership). */
+export const itemRelations = pgTable(
+  'item_relations',
+  {
+    id: uuid('id').primaryKey(),
+    showId: uuid('show_id')
+      .notNull()
+      .references(() => shows.id, { onDelete: 'cascade' }),
+    sourceItemId: uuid('source_item_id')
+      .notNull()
+      .references(() => queueItems.id, { onDelete: 'cascade' }),
+    targetItemId: uuid('target_item_id')
+      .notNull()
+      .references(() => queueItems.id, { onDelete: 'cascade' }),
+    offsetMs: bigint('offset_ms', { mode: 'number' }).notNull(),
+    preserveOffset: boolean('preserve_offset').notNull(),
+    active: boolean('active').notNull().default(true),
+    createdAt: tstz('created_at').notNull(),
+    updatedAt: tstz('updated_at').notNull(),
+    revision: integer('revision').notNull().default(0),
+  },
+  (t) => [
+    index('item_relations_show_idx').on(t.showId),
+    uniqueIndex('item_relations_pair_uq').on(t.sourceItemId, t.targetItemId),
+  ],
+);
+
+/** Suggested follow (durable runtime state; resolved rows are kept with their status). */
+export const queueSuggestions = pgTable(
+  'queue_suggestions',
+  {
+    id: uuid('id').primaryKey(),
+    showId: uuid('show_id')
+      .notNull()
+      .references(() => shows.id, { onDelete: 'cascade' }),
+    relationId: uuid('relation_id').notNull(),
+    sourceQueueId: uuid('source_queue_id').notNull(),
+    sourceItemId: uuid('source_item_id').notNull(),
+    targetQueueId: uuid('target_queue_id').notNull(),
+    targetItemId: uuid('target_item_id').notNull(),
+    targetCurrentAtCreation: uuid('target_current_at_creation'),
+    createdAt: tstz('created_at').notNull(),
+    status: text('status').notNull(),
+    resolvedAt: tstz('resolved_at'),
+  },
+  (t) => [
+    index('queue_suggestions_show_status_idx').on(t.showId, t.status),
+    check(
+      'queue_suggestions_status_check',
+      sql`${t.status} in ('pending', 'accepted', 'ignored', 'stale')`,
+    ),
+  ],
+);
+
+/** Ad-hoc Board messages (not Queue Items). */
+export const messages = pgTable(
+  'messages',
+  {
+    id: uuid('id').primaryKey(),
+    showId: uuid('show_id')
+      .notNull()
+      .references(() => shows.id, { onDelete: 'cascade' }),
+    text: text('text').notNull(),
+    audiences: text('audiences').array().notNull(),
+    boardIds: uuid('board_ids').array().notNull(),
+    priority: text('priority').notNull(),
+    createdAt: tstz('created_at').notNull(),
+    expiresAt: tstz('expires_at'),
+    clearedAt: tstz('cleared_at'),
+  },
+  (t) => [
+    index('messages_show_idx').on(t.showId),
+    check('messages_priority_check', sql`${t.priority} in ('normal', 'urgent')`),
+  ],
 );
 
 /**

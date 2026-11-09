@@ -14,6 +14,7 @@ import {
   ManualClock,
   MINUTE_MS,
   orderedItems,
+  withQueueView,
   ShowId,
   type QueueAggregate,
 } from '@klockr/domain';
@@ -25,6 +26,12 @@ import { PgIdempotencyStore, PgShowStore } from './repositories';
 
 const url = process.env.DATABASE_URL ?? 'postgres://klockr:klockr@localhost:54329/klockr_dev';
 const handle = createDatabase(url);
+async function loadShowState(showId: string) {
+  const show = await new PgShowStore(handle.db).loadShowAggregate(ShowId(showId));
+  if (!show) throw new Error('show missing');
+  return show;
+}
+
 const tokens = new FakeTokenService(randomUUID().slice(0, 8));
 
 beforeAll(async () => {
@@ -41,7 +48,7 @@ function services(clock: ManualClock): ShowServiceDeps & { store: PgShowStore } 
     store,
     clock,
     shows: store,
-    queues: store,
+    state: store,
     timers: store,
     grants: store,
     audit: store,
@@ -78,7 +85,7 @@ async function setup() {
   };
   const load = async (d: ShowServiceDeps = services(clock)): Promise<QueueAggregate> => {
     const show = await d.shows.getShow(showId);
-    const agg = show ? await d.queues.loadQueue(show.primaryQueueId) : null;
+    const agg = show ? await new PgShowStore(handle.db).loadQueue(show.primaryQueueId) : null;
     if (!agg) throw new Error('queue missing');
     return agg;
   };
@@ -192,8 +199,8 @@ describe('PostgreSQL Queue persistence (requires PostgreSQL)', () => {
       { actor: board.actor },
       services(deps.clock as ManualClock),
     );
-    expect(state.ok && state.value.current?.title).toBe('Speaker A');
-    expect(state.ok && 'notes' in (state.value.current ?? {})).toBe(false);
+    expect(state.ok && state.value.queues[0]?.current?.title).toBe('Speaker A');
+    expect(state.ok && 'notes' in (state.value.queues[0]?.current ?? {})).toBe(false);
   });
 
   it('END + NEXT is atomic: a lost timer race rolls back the whole transition', async () => {
@@ -218,6 +225,7 @@ describe('PostgreSQL Queue persistence (requires PostgreSQL)', () => {
 
     // Read, then let a concurrent timer command change A's timer before the save.
     const prev = await load();
+    const prevShow = await loadShowState(showId);
     const itemA = prev.items.find((i) => i.id === a);
     if (!itemA) throw new Error('missing A');
     const ended = endItem(
@@ -233,7 +241,10 @@ describe('PostgreSQL Queue persistence (requires PostgreSQL)', () => {
       deps,
     );
 
-    const saved = await deps.queues.saveQueue(prev, ended.value.aggregate);
+    const saved = await deps.state.saveShowAggregate(
+      prevShow,
+      withQueueView(prevShow, ended.value.aggregate),
+    );
     expect(!saved.ok && saved.error.code).toBe('revision_conflict');
 
     // Nothing of the END + NEXT was written.
@@ -254,12 +265,12 @@ describe('PostgreSQL Queue persistence (requires PostgreSQL)', () => {
   });
 
   it('a concurrent structural writer with a stale Queue revision is rejected', async () => {
-    const { run, load, deps } = await setup();
-    const prev = await load();
+    const { run, deps, showId } = await setup();
+    const prevShow = await loadShowState(showId);
     await run({ type: 'item.add', payload: { title: 'Winner' } });
-    const stale = await deps.queues.saveQueue(prev, {
-      ...prev,
-      queue: { ...prev.queue, revision: prev.queue.revision + 1 },
+    const stale = await deps.state.saveShowAggregate(prevShow, {
+      ...prevShow,
+      revision: prevShow.revision + 1,
     });
     expect(!stale.ok && stale.error.code).toBe('revision_conflict');
   });

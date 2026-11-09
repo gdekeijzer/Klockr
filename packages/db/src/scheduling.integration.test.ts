@@ -13,6 +13,7 @@ import {
   ManualClock,
   MINUTE_MS,
   setItemSchedule,
+  withQueueView,
   ShowId,
   type QueueAggregate,
 } from '@klockr/domain';
@@ -24,6 +25,12 @@ import { PgIdempotencyStore, PgShowStore } from './repositories';
 
 const url = process.env.DATABASE_URL ?? 'postgres://klockr:klockr@localhost:54329/klockr_dev';
 const handle = createDatabase(url);
+async function loadShowState(showId: string) {
+  const show = await new PgShowStore(handle.db).loadShowAggregate(ShowId(showId));
+  if (!show) throw new Error('show missing');
+  return show;
+}
+
 const tokens = new FakeTokenService(randomUUID().slice(0, 8));
 
 beforeAll(async () => {
@@ -39,7 +46,7 @@ function services(clock: ManualClock): ShowServiceDeps {
   return {
     clock,
     shows: store,
-    queues: store,
+    state: store,
     timers: store,
     grants: store,
     audit: store,
@@ -81,7 +88,7 @@ async function setup() {
   const load = async (): Promise<QueueAggregate> => {
     const d = services(clock);
     const show = await d.shows.getShow(showId);
-    const agg = show ? await d.queues.loadQueue(show.primaryQueueId) : null;
+    const agg = show ? await new PgShowStore(handle.db).loadQueue(show.primaryQueueId) : null;
     if (!agg) throw new Error('queue missing');
     return agg;
   };
@@ -225,6 +232,7 @@ describe('PostgreSQL scheduling, locks and audit (requires PostgreSQL)', () => {
   it('atomic scheduling change: a stale save writes neither planning nor audit', async () => {
     const s = await setup();
     const prev = await s.load();
+    const prevShow = await loadShowState(s.showId);
     const first = prev.items[0];
     if (!first) throw new Error('item');
     const planned = setItemSchedule(
@@ -237,17 +245,21 @@ describe('PostgreSQL scheduling, locks and audit (requires PostgreSQL)', () => {
       type: 'item.update',
       payload: { queueItemId: first.id, patch: { title: 'concurrent' } },
     });
-    const stale = await s.deps.queues.saveQueue(prev, planned.value, [
-      {
-        id: randomUUID(),
-        showId: s.showId,
-        at: s.clock.now(),
-        actor: s.owner.actor,
-        action: 'schedule.update',
-        resource: { kind: 'item', id: first.id },
-        details: {},
-      },
-    ]);
+    const stale = await s.deps.state.saveShowAggregate(
+      prevShow,
+      withQueueView(prevShow, planned.value),
+      [
+        {
+          id: randomUUID(),
+          showId: s.showId,
+          at: s.clock.now(),
+          actor: s.owner.actor,
+          action: 'schedule.update',
+          resource: { kind: 'item', id: first.id },
+          details: {},
+        },
+      ],
+    );
     expect(!stale.ok && stale.error.code).toBe('revision_conflict');
     expect((await s.load()).items[0]?.plannedStartAt).toBeNull();
     expect(await services(s.clock).audit.listAudit(s.showId, 10)).toHaveLength(0);
