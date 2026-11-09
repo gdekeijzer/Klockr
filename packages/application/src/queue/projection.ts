@@ -29,6 +29,11 @@ function itemSnapshot(agg: QueueAggregate, item: QueueItem, now: EpochMs): Queue
     warning: item.warning,
     effectiveWarning: resolveItemThresholds(agg.showWarning, agg.queue.warning, item.warning),
     timer: item.timer ? toTimerSnapshot(item.id, item.timer, now) : null,
+    plannedStartAt: item.plannedStartAt,
+    plannedDurationMs: item.plannedDurationMs,
+    fixedAnchor: item.fixedAnchor,
+    actualStartAt: item.actualStartAt,
+    actualEndAt: item.actualEndAt,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     revision: item.revision,
@@ -39,6 +44,7 @@ function itemSnapshot(agg: QueueAggregate, item: QueueItem, now: EpochMs): Queue
 export function toQueueSnapshot(agg: QueueAggregate, now: EpochMs): QueueSnapshot {
   return {
     id: agg.queue.id,
+    showId: agg.showId,
     name: agg.queue.name,
     revision: agg.queue.revision,
     currentItemId: agg.queue.currentItemId,
@@ -46,6 +52,14 @@ export function toQueueSnapshot(agg: QueueAggregate, now: EpochMs): QueueSnapsho
     showWarning: agg.showWarning,
     warning: agg.queue.warning,
     effectiveWarning: resolveQueueThresholds(agg.showWarning, agg.queue.warning),
+    showSchedule: agg.showSchedule,
+    timingMode: agg.queue.timingMode,
+    locks: agg.locks.map((l) => ({ ...l, target: { ...l.target }, lockedBy: { ...l.lockedBy } })),
+    unlockRequests: agg.unlockRequests.map((r) => ({
+      ...r,
+      target: { ...r.target },
+      requestedBy: { ...r.requestedBy },
+    })),
     groups: [...agg.groups]
       .sort((a, b) => a.position - b.position)
       .map((g) => ({ id: g.id, title: g.title, position: g.position })),

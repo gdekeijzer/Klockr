@@ -38,7 +38,7 @@ export const resolvedThresholdsSchema = z.object({
 });
 export type ResolvedThresholdsDto = z.infer<typeof resolvedThresholdsSchema>;
 
-export const startModeSchema = z.enum(['manual', 'on_previous_end']);
+export const startModeSchema = z.enum(['manual', 'on_previous_end', 'scheduled']);
 export const itemLifecycleSchema = z.enum(['current', 'completed', 'inactive', 'upcoming']);
 
 const title = z.string().min(1).max(QUEUE_LIMITS.title);
@@ -132,6 +132,60 @@ export const setShowWarningCommandSchema = commandSchema(
   z.object({ warning: thresholdRuleSchema }),
 );
 
+// --- Scheduling (schedule.manage) ------------------------------------------------------------
+
+export const timingModeSchema = z.enum(['strict', 'sliding']);
+
+/** Planning edit of one item. Only these commands change Planned values. */
+export const setItemScheduleCommandSchema = commandSchema(
+  'item.setSchedule',
+  target.extend({
+    plannedStartAt: epochMsSchema.nullable().optional(),
+    plannedDurationMs: z.int().min(0).max(MAX_DURATION_MS).nullable().optional(),
+    fixedAnchor: z.boolean().optional(),
+  }),
+);
+/** Queue override of the timing mode; `mode: null` = inherit the Show default. */
+export const setQueueTimingModeCommandSchema = commandSchema(
+  'queue.setTimingMode',
+  z.object({ mode: timingModeSchema.nullable() }),
+);
+export const showScheduleSchema = z.object({
+  timingMode: timingModeSchema,
+  timeZone: z.string().min(1).max(64),
+  scheduleDate: z.iso.date().nullable(),
+  toleranceMs: z.int().min(0).max(600_000),
+  severeBehindMs: z.int().min(0).max(MAX_DURATION_MS),
+});
+export type ShowScheduleDto = z.infer<typeof showScheduleSchema>;
+export const setShowScheduleCommandSchema = commandSchema(
+  'show.setSchedule',
+  showScheduleSchema.partial(),
+);
+
+// --- Locks ------------------------------------------------------------------------------------
+
+export const lockTargetSchema = z.object({
+  kind: z.enum(['show', 'queue', 'group', 'item']),
+  id: idSchema,
+});
+export type LockTargetDto = z.infer<typeof lockTargetSchema>;
+/** lock.manage */
+export const setLockCommandSchema = commandSchema(
+  'lock.set',
+  z.object({ target: lockTargetSchema }),
+);
+/** lock.manage — releases the target's own lock. */
+export const releaseLockCommandSchema = commandSchema(
+  'lock.release',
+  z.object({ target: lockTargetSchema }),
+);
+/** lock.request */
+export const requestUnlockCommandSchema = commandSchema(
+  'lock.requestUnlock',
+  z.object({ target: lockTargetSchema, reason: z.string().max(500).nullable().optional() }),
+);
+
 export const queueCommandSchema = z.discriminatedUnion('type', [
   addItemCommandSchema,
   updateItemCommandSchema,
@@ -149,6 +203,12 @@ export const queueCommandSchema = z.discriminatedUnion('type', [
   moveGroupCommandSchema,
   setQueueWarningCommandSchema,
   setShowWarningCommandSchema,
+  setItemScheduleCommandSchema,
+  setQueueTimingModeCommandSchema,
+  setShowScheduleCommandSchema,
+  setLockCommandSchema,
+  releaseLockCommandSchema,
+  requestUnlockCommandSchema,
 ]);
 export type QueueCommandDto = z.infer<typeof queueCommandSchema>;
 export type QueueCommandType = QueueCommandDto['type'];
@@ -172,6 +232,12 @@ export const queueItemSnapshotSchema = z.object({
   /** Effective thresholds with source. */
   effectiveWarning: resolvedThresholdsSchema,
   timer: timerSnapshotSchema.nullable(),
+  /** Planning inputs (persisted). Projected values are derived by clients with the domain engine. */
+  plannedStartAt: epochMsSchema.nullable(),
+  plannedDurationMs: z.int().nonnegative().nullable(),
+  fixedAnchor: z.boolean(),
+  actualStartAt: epochMsSchema.nullable(),
+  actualEndAt: epochMsSchema.nullable(),
   createdAt: epochMsSchema,
   updatedAt: epochMsSchema,
   revision: revisionSchema,
@@ -190,8 +256,29 @@ export type GroupSnapshot = z.infer<typeof groupSnapshotSchema>;
  * (groups expanded in place). `nextItemId` is derived by the server with the same domain rule
  * clients would use; it is not stored. Clients drop any snapshot with an older `revision`.
  */
+export const actorRefSchema = z.object({ kind: z.string(), id: z.string() });
+
+export const lockSnapshotSchema = z.object({
+  id: idSchema,
+  target: lockTargetSchema,
+  lockedAt: epochMsSchema,
+  lockedBy: actorRefSchema,
+});
+export type LockSnapshot = z.infer<typeof lockSnapshotSchema>;
+
+export const unlockRequestSnapshotSchema = z.object({
+  id: idSchema,
+  lockId: idSchema,
+  target: lockTargetSchema,
+  requestedAt: epochMsSchema,
+  requestedBy: actorRefSchema,
+  reason: z.string().nullable(),
+});
+export type UnlockRequestSnapshot = z.infer<typeof unlockRequestSnapshotSchema>;
+
 export const queueSnapshotSchema = z.object({
   id: idSchema,
+  showId: idSchema,
   name: z.string(),
   revision: revisionSchema,
   currentItemId: idSchema.nullable(),
@@ -199,6 +286,11 @@ export const queueSnapshotSchema = z.object({
   showWarning: thresholdRuleSchema,
   warning: thresholdRuleSchema.nullable(),
   effectiveWarning: resolvedThresholdsSchema,
+  showSchedule: showScheduleSchema,
+  /** Queue override of the timing mode (null = Show default). */
+  timingMode: timingModeSchema.nullable(),
+  locks: z.array(lockSnapshotSchema),
+  unlockRequests: z.array(unlockRequestSnapshotSchema),
   groups: z.array(groupSnapshotSchema),
   items: z.array(queueItemSnapshotSchema),
   serverTime: epochMsSchema,
@@ -212,3 +304,16 @@ export const queueCommandResponseSchema = z.object({
   createdId: idSchema.nullable(),
 });
 export type QueueCommandResponse = z.infer<typeof queueCommandResponseSchema>;
+
+/** Persistent audit record (GET /api/v1/shows/:showId/audit, capability audit.read). */
+export const auditEventSchema = z.object({
+  id: idSchema,
+  at: epochMsSchema,
+  actor: actorRefSchema,
+  action: z.string(),
+  resource: z.object({ kind: z.string(), id: z.string() }),
+  details: z.record(z.string(), z.unknown()),
+});
+export type AuditEventDto = z.infer<typeof auditEventSchema>;
+export const auditListResponseSchema = z.object({ events: z.array(auditEventSchema) });
+export type AuditListResponse = z.infer<typeof auditListResponseSchema>;

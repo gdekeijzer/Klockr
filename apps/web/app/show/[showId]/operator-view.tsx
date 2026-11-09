@@ -4,7 +4,9 @@ import type { QueueItemSnapshot, QueueSnapshot, TimerSnapshot } from '@klockr/co
 import { deriveTimer, timerPhase } from '@klockr/domain';
 import {
   colorVar,
+  formatClock,
   formatDuration,
+  formatSpan,
   formatThresholds,
   formatTimer,
   remainingFraction,
@@ -13,10 +15,13 @@ import {
   timerPhaseChip,
   timerStatusChip,
 } from '@klockr/ui';
+import type { ItemSchedule } from '@klockr/domain';
 import Link from 'next/link';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Chip } from '../../../components/Chip';
 import { ProgressBar } from '../../../components/ProgressBar';
+import { ScheduleBar } from '../../../components/ScheduleBar';
+import { useSchedule } from '../../../lib/use-schedule';
 import {
   ApiError,
   createBoardShare,
@@ -49,6 +54,7 @@ const noSubscription = () => () => undefined;
 export function OperatorView({ showId }: { showId: string }) {
   const rt = useShowRealtime(showId);
   const now = useServerNow(rt.offsetMs);
+  const schedule = useSchedule(rt.queue, rt.timers, now);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const live = rt.status === 'connected';
@@ -97,10 +103,19 @@ export function OperatorView({ showId }: { showId: string }) {
 
   return (
     <ShowFrame showId={showId} view="operator" rt={rt} now={now}>
+      {queue && schedule && <ScheduleBar queue={queue} schedule={schedule} />}
       <main className={styles.grid}>
         <div className={styles.column}>
           {queue ? (
-            <CurrentPanel item={current} timer={currentTimer} now={now} />
+            <CurrentPanel
+              item={current}
+              timer={currentTimer}
+              now={now}
+              plan={
+                current ? schedule?.projection.items.find((i) => i.id === current.id) : undefined
+              }
+              timeZone={queue.showSchedule.timeZone}
+            />
           ) : (
             <section className={styles.panel} aria-busy>
               <span className="label">Current</span>
@@ -124,7 +139,13 @@ export function OperatorView({ showId }: { showId: string }) {
         </div>
 
         <aside className={styles.side}>
-          {queue && <NextPanel item={next} />}
+          {queue && (
+            <NextPanel
+              item={next}
+              plan={next ? schedule?.projection.items.find((i) => i.id === next.id) : undefined}
+              timeZone={queue.showSchedule.timeZone}
+            />
+          )}
           {queue && (
             <QueuePreview
               queue={queue}
@@ -163,10 +184,40 @@ function ThresholdLine({ item }: { item: QueueItemSnapshot }) {
   );
 }
 
+/** Planned / Projected / Actual in one compact line set (only when there is a plan or actual). */
+function ScheduleFacts(props: { plan: ItemSchedule | undefined; timeZone: string }) {
+  const { plan, timeZone } = props;
+  if (!plan || (plan.plannedStart === null && plan.actualStart === null)) return null;
+  return (
+    <dl className={styles.facts} data-testid="current-schedule">
+      <div>
+        <dt className="label">Planned</dt>
+        <dd className="mono">
+          {formatClock(plan.plannedStart, timeZone)}–{formatClock(plan.plannedEnd, timeZone)}
+        </dd>
+      </div>
+      <div>
+        <dt className="label">Actual start</dt>
+        <dd className="mono" data-testid="current-actual-start">
+          {formatClock(plan.actualStart, timeZone, true)}
+        </dd>
+      </div>
+      <div>
+        <dt className="label">Projected end</dt>
+        <dd className="mono" data-testid="current-projected-end">
+          {formatClock(plan.projectedEnd, timeZone)}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
 function CurrentPanel(props: {
   item: QueueItemSnapshot | null;
   timer: TimerSnapshot | null;
   now: number;
+  plan: ItemSchedule | undefined;
+  timeZone: string;
 }) {
   const { item, timer, now } = props;
   if (!item) {
@@ -241,6 +292,7 @@ function CurrentPanel(props: {
             </div>
           </dl>
           <ThresholdLine item={item} />
+          <ScheduleFacts plan={props.plan} timeZone={props.timeZone} />
         </>
       ) : (
         <div className={styles.noTimer} data-testid="current-no-timer">
@@ -441,7 +493,15 @@ function DurationForm(props: {
   );
 }
 
-function NextPanel({ item }: { item: QueueItemSnapshot | null }) {
+function NextPanel({
+  item,
+  plan,
+  timeZone,
+}: {
+  item: QueueItemSnapshot | null;
+  plan: ItemSchedule | undefined;
+  timeZone: string;
+}) {
   return (
     <section className={styles.panel} aria-label="Next item" data-testid="next-panel">
       <div className={styles.panelHead}>
@@ -458,7 +518,24 @@ function NextPanel({ item }: { item: QueueItemSnapshot | null }) {
           {item.subtitle && <p className={styles.subtitle}>{item.subtitle}</p>}
           <span className="mono">
             {item.timer ? formatDuration(item.timer.durationMs) : 'No timer'}
+            {plan?.plannedStart !== null && plan?.plannedStart !== undefined && (
+              <span data-testid="next-schedule">
+                {' · planned '}
+                {formatClock(plan.plannedStart, timeZone)}
+                {' · projected '}
+                {formatClock(plan.projectedStart, timeZone)}
+              </span>
+            )}
           </span>
+          {plan?.shouldHaveStartedMs !== null && plan?.shouldHaveStartedMs !== undefined && (
+            <Chip
+              spec={{
+                label: `SHOULD HAVE STARTED ${formatSpan(plan.shouldHaveStartedMs)} AGO`,
+                variant: 'warning',
+              }}
+              testId="next-should-have-started"
+            />
+          )}
           {item.notes && <p className={styles.notes}>{item.notes}</p>}
         </>
       ) : (
@@ -494,8 +571,8 @@ function QueuePreview(props: {
     <section className={styles.panel} aria-label="Queue">
       <div className={styles.panelHead}>
         <span className="label">Queue</span>
-        <Link className={styles.link} href={`/show/${props.showId}/edit`}>
-          Edit queue
+        <Link className={styles.link} href={`/show/${props.showId}/master`}>
+          Open Master
         </Link>
       </div>
       <ol className={styles.list} data-testid="queue-preview">

@@ -1,5 +1,6 @@
 import type {
   AccessGrant,
+  ActorRef,
   Board,
   BoardId,
   EpochMs,
@@ -76,7 +77,30 @@ export interface QueueRepository {
    * revision it had in `prev` (compare-and-set). Otherwise nothing is written and
    * `revision_conflict` is returned. Unchanged items/timers are not rewritten.
    */
-  saveQueue(prev: QueueAggregate, next: QueueAggregate): Promise<Result<void, AppError>>;
+  saveQueue(
+    prev: QueueAggregate,
+    next: QueueAggregate,
+    audit?: readonly AuditRecord[],
+  ): Promise<Result<void, AppError>>;
+}
+
+/**
+ * Persistent audit record of an operationally important change (locks, Emergency Override,
+ * planning, anchors, timing mode). Written in the SAME transaction as the change it describes.
+ */
+export interface AuditRecord {
+  readonly id: string;
+  readonly showId: ShowId;
+  readonly at: EpochMs;
+  readonly actor: ActorRef;
+  readonly action: string;
+  readonly resource: { readonly kind: string; readonly id: string };
+  readonly details: Readonly<Record<string, unknown>>;
+}
+
+export interface AuditRepository {
+  /** Newest first. */
+  listAudit(showId: ShowId, limit: number): Promise<readonly AuditRecord[]>;
 }
 
 export interface GrantRepository {

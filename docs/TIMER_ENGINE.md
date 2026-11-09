@@ -151,9 +151,11 @@ Overtime remains derived state and is never persisted separately.
 Per item:
 
 - `manual` — operator explicitly starts;
-- `scheduled` — item has a schedule trigger policy;
-- `previous_end` — starts after the configured previous/preceding item END;
+- `scheduled` — item has a schedule trigger policy (M3: soft only — `SHOULD HAVE STARTED mm:ss AGO`, never an automatic START);
+- `on_previous_end` (`previous_end`) — END + NEXT that makes it current also starts its timer (M2);
 - `external` — API/integration command invokes the normal application start command.
+
+Actual times (M3): the first START of an item's timer records `actualStartAt` (an item without timer: when it becomes current); the first END records `actualEndAt`. Neither is rewritten afterwards (a restart or re-run keeps the first values). Timer transitions run through the Queue aggregate so this is atomic with the transition.
 
 ### Scheduled variants
 

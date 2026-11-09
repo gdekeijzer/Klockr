@@ -59,6 +59,7 @@ describe('Quick Timer use cases', () => {
       timers: store,
       queues: store,
       grants: store,
+      audit: store,
       locator: store,
       tokens,
       ids: new SequentialIds(),
@@ -216,7 +217,7 @@ describe('Quick Timer use cases', () => {
 
       expect(events.events.every((e) => e.showId === ShowId(show.showId))).toBe(true);
       expect(
-        events.events.map((e) => (e.type === 'timer.transitioned' ? e.state.revision : -1)),
+        events.events.flatMap((e) => (e.type === 'timer.transitioned' ? [e.state.revision] : [])),
       ).toEqual([1, 2, 3, 4, 5, 6]);
     });
 
@@ -266,7 +267,8 @@ describe('Quick Timer use cases', () => {
         deps,
       );
       expect(retry).toEqual(first);
-      expect(events.events).toHaveLength(1);
+      // One commit: one timer transition plus the Queue projection it changes.
+      expect(events.events.map((e) => e.type)).toEqual(['timer.transitioned', 'queue.changed']);
     });
   });
 });

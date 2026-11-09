@@ -170,3 +170,12 @@ The web client uses the command id as idempotency key, so retried requests never
 | `item.end` | `item.control` | `queueItemId` (must be current), `next` (false = END, true = END + NEXT) |
 
 Presets (Timer, Speaker, Note, Break) are UI only and all send `item.add`. `GET /api/v1/shows/:showId/state` returns `{ show, board, queue }`; `GET /api/v1/board/state` returns `{ board, queueRevision, current, warning, timer, serverTime }`. Without `expectedRevision` a lost compare-and-set race is re-evaluated against the fresh state (max. 3 attempts); with it, a mismatch is `409 revision_conflict`.
+
+## Implemented in M3
+
+- New Queue commands on `POST /api/v1/shows/:showId/commands`: `item.setSchedule` {queueItemId, plannedStartAt?, plannedDurationMs?, fixedAnchor?} and `queue.setTimingMode` {mode|null} and `show.setSchedule` {timingMode?, timeZone?, scheduleDate?, toleranceMs?, severeBehindMs?} (`schedule.manage`); `lock.set` / `lock.release` {target} (`lock.manage`); `lock.requestUnlock` {target, reason?} (`lock.request`). `startMode` accepts `scheduled`.
+- Envelope: optional `override: { reason }` = explicit Emergency Override of a lock (`lock.override`, always audited).
+- Error `locked` → **HTTP 423** with `details.lock` {id, target} and `details.inheritedFrom`.
+- `GET /api/v1/shows/:showId/audit?limit=` (owner cookie, `audit.read`) → `{ events: [{ id, at, actor, action, resource, details }] }`, newest first.
+- `POST /api/v1/shows` accepts optional `timeZone` (IANA) and `scheduleDate` (YYYY-MM-DD); the web client sends the creating browser's values.
+- Queue snapshots carry the planning inputs (`plannedStartAt`, `plannedDurationMs`, `fixedAnchor`, `actualStartAt`, `actualEndAt`, `showSchedule`, `timingMode`, `locks`, `unlockRequests`); projected values are derived by clients with the domain engine.

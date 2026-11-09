@@ -154,3 +154,16 @@ Timer writes are compare-and-set on `revision`. All child rows cascade on Show d
 No `next` column: next is derived. No separate tables for Speaker/Note/Break: presets fill the same `queue_items` row. The migration also sets `current_item_id` of existing M1 Quick Timer Queues to their single item.
 
 Writes go through `PgShowStore.saveQueue(prev, next)`: one transaction that claims the Queue revision (compare-and-set), then writes only what differs (groups, items by item revision, timers with per-timer compare-and-set), removes deleted rows and finally updates the current pointer. Any lost race rolls back everything.
+
+## Implemented in M3 (migrations `0003_scheduling_locks`, `0004_audit_sequence`)
+
+| Table | Change |
+| --- | --- |
+| `shows` | + `timing_mode` (`strict`/`sliding`, default strict), `time_zone` (IANA, default UTC), `schedule_date` (YYYY-MM-DD), `tolerance_ms` (30000), `severe_behind_ms` (300000) |
+| `queues` | + `timing_mode` null (Queue override) |
+| `queue_items` | + `planned_start_at` (explicit only), `planned_duration_ms` (untimed items), `fixed_anchor`, `actual_start_at`, `actual_end_at`; `start_mode` adds `scheduled` |
+| `locks` (new) | id, show_id, queue_id, target_kind (`show/queue/group/item`), target_id (unique per target), locked_at, locked_by_kind/id |
+| `unlock_requests` (new) | id, show_id, queue_id, lock_id, target, requested_at, requested_by, reason, resolved_at (kept for history) |
+| `audit_events` (new) | id, seq (identity, stable order), show_id, at, actor_kind/id, action, resource_kind/id, details jsonb |
+
+Not stored: chained planned times, projected times, offsets, statuses, recovery, warnings (all derived by the domain engine). Locks, requests and audit records are written in the same `saveQueue` transaction as the change.

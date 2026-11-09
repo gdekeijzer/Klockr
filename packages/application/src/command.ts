@@ -14,6 +14,8 @@ export interface Command<TType extends string, TPayload> {
   readonly payload: TPayload;
   readonly idempotencyKey?: string | undefined;
   readonly expectedRevision?: number | undefined;
+  /** Emergency Override of a lock (requires `lock.override`; always audited). */
+  readonly override?: { readonly reason: string } | undefined;
 }
 
 /**

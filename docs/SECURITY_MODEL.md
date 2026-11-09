@@ -116,3 +116,9 @@ Anonymous cleanup verifies expiry, active-use protection and grace/safety policy
 - New capabilities: `queue.read`, `queue.manage` (structure, content, overrides), `item.control` (current, END / NEXT), `show.manage` (Show defaults). `anonymous_owner` bundles all of them for its own Show; `board_share` still has only `board.read`. Each Queue command declares its capability (`permissionFor()` in `packages/application/src/queue/queue-commands.ts`); no role-name checks.
 - A board token can never send commands: the commands endpoint only accepts the owner cookie (a bearer board token gets 401), and the application layer denies board actors independently (tested at unit, server and PostgreSQL level).
 - Board projections contain only the current item's title/subtitle, effective thresholds and timer — never notes, tags, other items or management data. User text is rendered as React text (escaped), never as HTML.
+
+## Implemented in M3
+
+- Capabilities `schedule.read`, `schedule.manage`, `lock.manage`, `lock.request`, `lock.override`, `audit.read` (bundled in `anonymous_owner`; never in `board_share`).
+- Locks are enforced in the application layer before the domain operation, atomically with the change (same aggregate). Emergency Override is never implicit: the client must resend the command with an explicit reason, the server checks `lock.override`, and the audit record is written in the same transaction as the overridden change.
+- The audit trail is only readable with `audit.read` via the owner credential; board tokens get 401/403.

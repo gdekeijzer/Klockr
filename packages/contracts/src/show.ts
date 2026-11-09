@@ -6,6 +6,10 @@ import { MAX_DURATION_MS, timerSnapshotSchema } from './timer';
 /** POST /api/v1/shows — Anonymous New Show with a Quick Timer. */
 export const createQuickTimerRequestSchema = z.object({
   durationMs: z.int().positive().max(MAX_DURATION_MS),
+  /** Creating browser's IANA timezone, used for human schedule times (default UTC). */
+  timeZone: z.string().min(1).max(64).optional(),
+  /** Show day YYYY-MM-DD in that timezone. */
+  scheduleDate: z.iso.date().optional(),
 });
 export type CreateQuickTimerRequest = z.infer<typeof createQuickTimerRequestSchema>;
 

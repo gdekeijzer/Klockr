@@ -1,4 +1,5 @@
 import type {
+  AuditListResponse,
   BoardShareResponse,
   CreateQuickTimerResponse,
   ErrorResponse,
@@ -16,6 +17,7 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly details: Readonly<Record<string, unknown>> = {},
   ) {
     super(message);
   }
@@ -38,13 +40,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       res.status,
       body?.error.code ?? 'internal',
       body?.error.message ?? res.statusText,
+      body?.error.details ?? {},
     );
   }
   return (await res.json()) as T;
 }
 
+/**
+ * Anonymous New Show. The creating browser's timezone and today's date become the Show's
+ * schedule timezone/date (human HH:MM planning), changeable later in Master.
+ */
 export function createQuickTimer(durationMs: number): Promise<CreateQuickTimerResponse> {
-  return request('/shows', { method: 'POST', body: JSON.stringify({ durationMs }) });
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const scheduleDate = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date());
+  return request('/shows', {
+    method: 'POST',
+    body: JSON.stringify({ durationMs, timeZone, scheduleDate }),
+  });
 }
 
 export function createBoardShare(showId: string): Promise<BoardShareResponse> {
@@ -87,4 +99,8 @@ export async function sendQueueCommand(
     method: 'POST',
     body: JSON.stringify({ ...command, commandId, idempotencyKey: commandId }),
   });
+}
+
+export function fetchAudit(showId: string): Promise<AuditListResponse> {
+  return request<AuditListResponse>(`/shows/${showId}/audit?limit=50`);
 }

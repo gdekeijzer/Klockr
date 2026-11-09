@@ -2,6 +2,7 @@ import {
   createBoardShare,
   createQuickTimer,
   executeQueueCommand,
+  getAuditTrail,
   getBoardState,
   getShowState,
   runShowTimerCommand,
@@ -16,6 +17,7 @@ import {
   showCommandSchema,
   timerCommandSchema,
   queueCommandSchema,
+  type AuditListResponse,
   type BoardShareResponse,
   type CreateQuickTimerResponse,
   type QueueCommandResponse,
@@ -119,6 +121,35 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
     const response: QueueCommandResponse = {
       queue: toQueueSnapshot(result.value.aggregate, services.clock.now()),
       createdId: result.value.createdId,
+    };
+    return response;
+  });
+
+  app.get('/api/v1/shows/:showId/audit', async (request, reply) => {
+    const params = showParams.safeParse(request.params);
+    if (!params.success) return badRequest(reply, params.error);
+    const query = z
+      .object({ limit: z.coerce.number().int().min(1).max(500).default(100) })
+      .safeParse(request.query);
+    if (!query.success) return badRequest(reply, query.error);
+    const owner = await ownerFromRequest(request, params.data.showId, services);
+    if (!owner) return reply.code(401).send(unauthenticated);
+    const trail = await getAuditTrail(
+      ShowId(params.data.showId),
+      { actor: owner.actor },
+      services,
+      query.data.limit,
+    );
+    if (!trail.ok) return reply.code(httpStatusOf(trail.error)).send(errorBody(trail.error));
+    const response: AuditListResponse = {
+      events: trail.value.map((e) => ({
+        id: e.id,
+        at: e.at,
+        actor: e.actor,
+        action: e.action,
+        resource: e.resource,
+        details: { ...e.details },
+      })),
     };
     return response;
   });

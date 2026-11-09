@@ -57,6 +57,9 @@ function quickShow(): QueueAggregate {
   return {
     showId: created.show.id,
     showWarning: created.show.warning,
+    showSchedule: created.show.schedule,
+    locks: [],
+    unlockRequests: [],
     queue: created.queue,
     groups: [],
     items: [created.item],

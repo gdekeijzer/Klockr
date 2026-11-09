@@ -32,6 +32,12 @@ export function commandSchema<TType extends string, TPayload extends z.ZodType>(
     type: z.literal(type),
     idempotencyKey: idempotencyKeySchema.optional(),
     expectedRevision: revisionSchema.optional(),
+    /**
+     * Emergency Override: explicitly perform this command although its target is locked.
+     * Requires the `lock.override` capability; always audited (actor, time, resource, reason,
+     * command). Never implicit.
+     */
+    override: z.object({ reason: z.string().trim().min(1).max(500) }).optional(),
     payload,
   });
 }
@@ -43,6 +49,8 @@ export const errorCodeSchema = z.enum([
   'revision_conflict',
   'invalid_transition',
   'idempotency_conflict',
+  /** The target (or a parent) is locked; details name the lock. */
+  'locked',
   'internal',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;

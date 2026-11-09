@@ -12,6 +12,12 @@ export type Permission =
   | 'queue.manage'
   | 'item.control'
   | 'timer.control'
+  | 'schedule.read'
+  | 'schedule.manage'
+  | 'lock.manage'
+  | 'lock.request'
+  | 'lock.override'
+  | 'audit.read'
   | 'board.share'
   | 'board.read';
 
@@ -40,6 +46,13 @@ const BUNDLES: Readonly<Record<GrantKind, readonly Permission[]>> = {
     'queue.manage',
     'item.control',
     'timer.control',
+    // M3: planning, locks (incl. Emergency Override) and the audit trail of its own Show.
+    'schedule.read',
+    'schedule.manage',
+    'lock.manage',
+    'lock.request',
+    'lock.override',
+    'audit.read',
     'board.share',
   ],
   // Read-only access to one Board projection. Never mutating.

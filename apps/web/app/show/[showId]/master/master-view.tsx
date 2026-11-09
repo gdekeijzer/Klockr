@@ -1,7 +1,13 @@
 'use client';
 
-import type { GroupSnapshot, QueueItemSnapshot, QueueSnapshot } from '@klockr/contracts';
-import { formatDuration } from '@klockr/ui';
+import type {
+  GroupSnapshot,
+  LockTargetDto,
+  QueueItemSnapshot,
+  QueueSnapshot,
+} from '@klockr/contracts';
+import { effectiveLock, type ItemSchedule, type QueueAggregate } from '@klockr/domain';
+import { formatClock, formatDuration, formatOffset, formatSpan } from '@klockr/ui';
 import { useState, type DragEvent } from 'react';
 import { ApiError, sendQueueCommand, type QueueCommandBody } from '../../../../lib/api';
 import { parseDurationInput } from '../../../../lib/duration-input';
@@ -13,11 +19,22 @@ import {
   type Dragged,
   type DropTarget,
 } from '../../../../lib/queue-layout';
+import { LockIcon } from '../../../../components/LockIcon';
+import { ScheduleBar } from '../../../../components/ScheduleBar';
+import { aggregateFromSnapshot } from '../../../../lib/schedule-view';
 import { useShowRealtime } from '../../../../lib/use-realtime';
+import { useSchedule } from '../../../../lib/use-schedule';
 import { useServerNow } from '../../../../lib/use-server-now';
 import { ShowFrame } from '../show-frame';
 import styles from '../show.module.css';
 import editor from './editor.module.css';
+import {
+  AuditPanel,
+  LockedNotice,
+  LockSection,
+  ScheduleSection,
+  ShowSchedulePanel,
+} from './schedule-panels';
 import { ThresholdEditor } from './threshold-editor';
 
 /** UI presets. They all create the same universal Queue Item (no separate domain types). */
@@ -28,18 +45,28 @@ const PRESETS = [
   { label: 'Break', title: 'Break', durationMs: 15 * 60_000 },
 ] as const;
 
-type Selection = { readonly kind: 'item' | 'group'; readonly id: string } | null;
+type Selection = { readonly kind: 'item' | 'group' | 'queue' | 'show'; readonly id: string } | null;
+
+interface Blocked {
+  readonly body: QueueCommandBody;
+  readonly message: string;
+  readonly target: LockTargetDto | null;
+}
 
 /**
- * Queue Editor for the Program Queue: structure and content (add, edit, delete, duplicate,
- * reorder, Groups, active/inactive, overrides). Drag & drop only ever moves structure; it never
- * makes an item current or touches a timer. Live operation stays in the Operator View.
+ * Master View (M3) for one Show with its Program Queue: structure tree, a dense planning /
+ * rundown workspace (planned vs projected, status, anchors, locks) and an inspector with
+ * Planned / Projected / Actual, locks and the audit trail. It also hosts the M2 Queue editing
+ * (one editing system). Drag & drop and planning edits never change live runtime state: Current
+ * does not change, timers do not start or stop; the projection is simply recalculated.
  */
-export function QueueEditor({ showId }: { showId: string }) {
+export function MasterView({ showId }: { showId: string }) {
   const rt = useShowRealtime(showId);
   const now = useServerNow(rt.offsetMs, 1_000);
+  const schedule = useSchedule(rt.queue, rt.timers, now);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [blocked, setBlocked] = useState<Blocked | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [dragged, setDragged] = useState<Dragged | null>(null);
@@ -55,9 +82,15 @@ export function QueueEditor({ showId }: { showId: string }) {
     try {
       const result = await sendQueueCommand(showId, body);
       rt.applyQueue(result.queue);
+      setBlocked(null);
       return result.createdId;
     } catch (e) {
-      setError(`Not applied: ${e instanceof ApiError ? e.message : 'unknown error'}`);
+      if (e instanceof ApiError && e.code === 'locked') {
+        const lock = e.details.lock as { target?: LockTargetDto } | undefined;
+        setBlocked({ body, message: e.message, target: lock?.target ?? null });
+      } else {
+        setError(`Not applied: ${e instanceof ApiError ? e.message : 'unknown error'}`);
+      }
       return null;
     } finally {
       setPending(false);
@@ -111,11 +144,26 @@ export function QueueEditor({ showId }: { showId: string }) {
   const selectedGroup =
     selection?.kind === 'group' ? queue?.groups.find((g) => g.id === selection.id) : undefined;
   const order = new Map(queue?.items.map((item, index) => [item.id, index + 1]));
+  const aggregate: QueueAggregate | null = queue ? aggregateFromSnapshot(queue, rt.timers) : null;
+  const scheduleOf = new Map<string, ItemSchedule>(
+    schedule?.projection.items.map((i) => [i.id, i]) ?? [],
+  );
+  const tz = queue?.showSchedule.timeZone ?? 'UTC';
+  const tolerance = queue?.showSchedule.toleranceMs ?? 30_000;
+  const lockedTarget = (target: LockTargetDto) =>
+    aggregate ? effectiveLock(aggregate, target) : null;
 
   function itemRow(item: QueueItemSnapshot, nested: boolean) {
     if (!queue) return null;
     const up = stepMove(queue, item.id, -1);
     const down = stepMove(queue, item.id, 1);
+    const plan = scheduleOf.get(item.id);
+    const locked = lockedTarget({ kind: 'item', id: item.id });
+    const updated = schedule?.updated.get(item.id);
+    const shift = plan?.startShiftMs ?? null;
+    const showShift =
+      shift !== null && Math.abs(shift) > tolerance && item.lifecycle !== 'completed';
+    const duration = item.timer?.durationMs ?? item.plannedDurationMs;
     return (
       <li
         key={item.id}
@@ -125,6 +173,11 @@ export function QueueEditor({ showId }: { showId: string }) {
         data-testid="editor-row"
         data-title={item.title}
         data-nested={nested}
+        data-planned-start={plan?.plannedStart ?? ''}
+        data-projected-start={plan?.projectedStart ?? ''}
+        data-shift={plan?.startShiftMs ?? ''}
+        data-locked={locked !== null}
+        data-anchor={item.fixedAnchor}
         {...dragProps({ kind: 'item', id: item.id })}
         {...dropProps({ kind: 'item', id: item.id }, `item:${item.id}`)}
       >
@@ -144,12 +197,65 @@ export function QueueEditor({ showId }: { showId: string }) {
         >
           <span className={styles.rowTitle}>{item.title}</span>
           <span className={styles.rowSub}>
-            {[item.subtitle, item.timer ? formatDuration(item.timer.durationMs) : 'No timer']
-              .filter(Boolean)
-              .join(' · ')}
+            {[item.subtitle, item.timer ? null : 'No timer'].filter(Boolean).join(' · ') ||
+              '\u00a0'}
           </span>
         </button>
-        <span className={styles.rowMeta}>
+        <span
+          className={`${editor.cell} mono`}
+          data-explicit={plan?.explicitStart ?? false}
+          title={
+            plan?.explicitStart ? 'Planned start (set)' : 'Planned start (after previous item)'
+          }
+        >
+          {plan?.skipped ? '—' : formatClock(plan?.plannedStart ?? null, tz)}
+        </span>
+        <span className={`${editor.cell} ${editor.projected} mono`} title="Projected start">
+          {plan?.skipped || item.lifecycle === 'completed'
+            ? formatClock(item.actualStartAt, tz)
+            : formatClock(plan?.projectedStart ?? null, tz)}
+        </span>
+        <span className={`${editor.cell} mono`}>
+          {duration === null ? '—' : formatDuration(duration)}
+        </span>
+        <span className={`${styles.rowMeta} ${editor.rowMetaCell}`}>
+          {showShift && (
+            <span
+              className={editor.shift}
+              data-direction={shift > 0 ? 'later' : 'earlier'}
+              title="Projected start vs planned start"
+            >
+              {formatOffset(Math.round(shift / 60_000) * 60_000)}
+            </span>
+          )}
+          {updated && (
+            <span
+              className={editor.updated}
+              data-testid="row-updated"
+              title="Projection just changed"
+            >
+              UPDATED {formatOffset(updated.deltaMs)}
+            </span>
+          )}
+          {plan?.shouldHaveStartedMs !== null && plan?.shouldHaveStartedMs !== undefined && (
+            <span className={editor.overdue} data-testid="should-have-started">
+              SHOULD HAVE STARTED {formatSpan(plan.shouldHaveStartedMs)} AGO
+            </span>
+          )}
+          {item.fixedAnchor && (
+            <span className={editor.anchor} title="Fixed-time anchor">
+              FIXED
+            </span>
+          )}
+          {item.startMode === 'scheduled' && <span className={styles.tag}>SCHED</span>}
+          {locked && (
+            <span
+              className={editor.locked}
+              title={locked.inheritedFrom ? 'Locked (inherited)' : 'Locked'}
+            >
+              <LockIcon /> LOCKED
+            </span>
+          )}
           {item.lifecycle === 'current' && <span className={styles.tag}>CURRENT</span>}
           {item.id === queue.nextItemId && (
             <span className={styles.tag} data-kind="next">
@@ -263,7 +369,15 @@ export function QueueEditor({ showId }: { showId: string }) {
               setSelection({ kind: 'group', id: group.id });
             }}
           >
-            <span className={editor.groupTitle}>{group.title}</span>
+            <span className={editor.groupTitle}>
+              {group.title}
+              {lockedTarget({ kind: 'group', id: group.id }) && (
+                <span className={editor.locked}>
+                  {' '}
+                  <LockIcon /> LOCKED
+                </span>
+              )}
+            </span>
             <span className={styles.rowSub}>
               {items.length} {items.length === 1 ? 'item' : 'items'}
             </span>
@@ -304,8 +418,18 @@ export function QueueEditor({ showId }: { showId: string }) {
   }
 
   return (
-    <ShowFrame showId={showId} view="editor" rt={rt} now={now}>
-      <main className={editor.grid}>
+    <ShowFrame showId={showId} view="master" rt={rt} now={now}>
+      {queue && schedule && <ScheduleBar queue={queue} schedule={schedule} />}
+      <main className={editor.masterGrid}>
+        {queue && aggregate && (
+          <StructureTree
+            queue={queue}
+            aggregate={aggregate}
+            title={rt.show?.title ?? 'Show'}
+            selection={selection}
+            onSelect={setSelection}
+          />
+        )}
         <section className={styles.panel} aria-label="Program queue">
           <div className={styles.panelHead}>
             <span className="label">Program queue</span>
@@ -350,8 +474,34 @@ export function QueueEditor({ showId }: { showId: string }) {
             </button>
           </div>
 
+          {blocked && (
+            <LockedNotice
+              key={JSON.stringify(blocked.body)}
+              message={blocked.message}
+              target={blocked.target}
+              disabled={disabled}
+              onRequestUnlock={(target) => {
+                void run({ type: 'lock.requestUnlock', payload: { target, reason: null } });
+              }}
+              onOverride={(reason) => {
+                void run({ ...blocked.body, override: { reason } });
+              }}
+              onDismiss={() => {
+                setBlocked(null);
+              }}
+            />
+          )}
           {queue ? (
             <>
+              <div className={editor.columns} aria-hidden>
+                <span>#</span>
+                <span>Item</span>
+                <span title="Planned start">Plan</span>
+                <span title="Projected start">Proj.</span>
+                <span>Dur</span>
+                <span>Status</span>
+                <span />
+              </div>
               <ol className={styles.list} data-testid="editor-list">
                 {rowsOf(queue).map((row) =>
                   row.kind === 'item' ? itemRow(row.item, false) : groupBlock(row.group, row.items),
@@ -376,40 +526,96 @@ export function QueueEditor({ showId }: { showId: string }) {
         </section>
 
         <aside className={styles.side}>
-          {selectedItem && queue && (
-            <ItemInspector
-              key={`${selectedItem.id}:${String(selectedItem.revision)}`}
-              item={selectedItem}
-              queue={queue}
-              disabled={disabled}
-              onCommand={command}
-              onClose={() => {
-                setSelection(null);
-              }}
-            />
+          {selectedItem && queue && aggregate && (
+            <>
+              <ItemInspector
+                key={`${selectedItem.id}:${String(selectedItem.revision)}`}
+                item={selectedItem}
+                queue={queue}
+                disabled={disabled}
+                onCommand={command}
+                onClose={() => {
+                  setSelection(null);
+                }}
+              />
+              <section className={styles.panel} aria-label="Item schedule">
+                <ScheduleSection
+                  key={`schedule:${selectedItem.id}:${String(selectedItem.revision)}`}
+                  item={selectedItem}
+                  queue={queue}
+                  schedule={scheduleOf.get(selectedItem.id)}
+                  now={now}
+                  disabled={disabled}
+                  onCommand={command}
+                />
+                <LockSection
+                  target={{ kind: 'item', id: selectedItem.id }}
+                  aggregate={aggregate}
+                  queue={queue}
+                  disabled={disabled}
+                  onCommand={command}
+                />
+              </section>
+            </>
           )}
-          {selectedGroup && (
-            <GroupInspector
-              key={`${selectedGroup.id}:${selectedGroup.title}`}
-              group={selectedGroup}
-              queue={queue}
-              disabled={disabled}
-              onCommand={command}
-              onClose={() => {
-                setSelection(null);
-              }}
-            />
+          {selectedGroup && queue && aggregate && (
+            <>
+              <GroupInspector
+                key={`${selectedGroup.id}:${selectedGroup.title}`}
+                group={selectedGroup}
+                queue={queue}
+                disabled={disabled}
+                onCommand={command}
+                onClose={() => {
+                  setSelection(null);
+                }}
+              />
+              <section className={styles.panel} aria-label="Group lock">
+                <LockSection
+                  target={{ kind: 'group', id: selectedGroup.id }}
+                  aggregate={aggregate}
+                  queue={queue}
+                  disabled={disabled}
+                  onCommand={command}
+                />
+              </section>
+            </>
           )}
-          {!selectedItem && !selectedGroup && (
-            <section className={styles.panel}>
-              <span className="label">Edit</span>
-              <p className={styles.muted}>
-                Select an item or group to edit it. Drag rows (or use ↑ ↓) to reorder; drop an item
-                on a group header to move it into that group.
-              </p>
-            </section>
+          {!selectedItem && !selectedGroup && queue && aggregate && (
+            <>
+              <section className={styles.panel}>
+                <span className="label">Edit</span>
+                <p className={styles.muted}>
+                  Select an item or group to edit it. Drag rows (or use ↑ ↓) to reorder; drop an
+                  item on a group header to move it into that group. Reordering recalculates the
+                  projection; it never changes Planned times, Current or timers.
+                </p>
+              </section>
+              <ShowSchedulePanel
+                key={JSON.stringify(queue.showSchedule)}
+                queue={queue}
+                disabled={disabled}
+                onCommand={command}
+              />
+              <section className={styles.panel} aria-label="Show and queue locks">
+                <LockSection
+                  target={
+                    selection?.kind === 'show'
+                      ? { kind: 'show', id: queue.showId }
+                      : { kind: 'queue', id: queue.id }
+                  }
+                  aggregate={aggregate}
+                  queue={queue}
+                  disabled={disabled}
+                  onCommand={command}
+                />
+              </section>
+            </>
           )}
-          {queue && <SettingsPanel queue={queue} disabled={disabled} onCommand={command} />}
+          {queue && !selectedItem && !selectedGroup && (
+            <SettingsPanel queue={queue} disabled={disabled} onCommand={command} />
+          )}
+          {queue && <AuditPanel showId={showId} revision={queue.revision} timeZone={tz} />}
         </aside>
       </main>
     </ShowFrame>
@@ -513,12 +719,14 @@ function ItemInspector(props: {
           <select
             className={styles.input}
             value={startMode}
+            aria-label="Start mode"
             onChange={(e) => {
               setStartMode(e.target.value as typeof startMode);
             }}
           >
             <option value="manual">Manual start</option>
             <option value="on_previous_end">Start on previous END + NEXT</option>
+            <option value="scheduled">Scheduled (soft: warn when late, never auto-start)</option>
           </select>
         </label>
         <label className={editor.field}>
@@ -857,5 +1065,73 @@ function SettingsPanel(props: {
         />
       </div>
     </section>
+  );
+}
+
+/** Left zone: Show -> Queue -> Groups -> Queue Items, with lock state and current marker. */
+function StructureTree(props: {
+  queue: QueueSnapshot;
+  aggregate: QueueAggregate;
+  title: string;
+  selection: Selection;
+  onSelect: (selection: Selection) => void;
+}) {
+  const { queue, aggregate, selection, onSelect } = props;
+  const lockMark = (target: LockTargetDto) =>
+    effectiveLock(aggregate, target) ? (
+      <span className={editor.locked} aria-label="locked">
+        <LockIcon />
+      </span>
+    ) : null;
+  const node = (
+    kind: NonNullable<Selection>['kind'],
+    id: string,
+    label: string,
+    depth: number,
+    extra?: string,
+  ) => (
+    <li key={`${kind}:${id}`}>
+      <button
+        type="button"
+        className={editor.treeNode}
+        style={{ paddingLeft: `${String(8 + depth * 14)}px` }}
+        data-selected={selection?.kind === kind && selection.id === id}
+        aria-label={`Select ${kind} ${label}`}
+        onClick={() => {
+          onSelect(kind === 'show' || kind === 'queue' ? { kind, id } : { kind, id });
+        }}
+      >
+        <span className={editor.treeLabel}>{label}</span>
+        {extra && <span className={styles.tag}>{extra}</span>}
+        {lockMark({ kind, id })}
+      </button>
+    </li>
+  );
+  return (
+    <nav className={styles.panel} aria-label="Structure" data-testid="structure-tree">
+      <span className="label">Structure</span>
+      <ul className={editor.tree}>
+        {node('show', queue.showId, props.title, 0)}
+        {node('queue', queue.id, queue.name, 1)}
+        {rowsOf(queue).flatMap((row) =>
+          row.kind === 'item'
+            ? [
+                node(
+                  'item',
+                  row.item.id,
+                  row.item.title,
+                  2,
+                  row.item.lifecycle === 'current' ? 'CURRENT' : undefined,
+                ),
+              ]
+            : [
+                node('group', row.group.id, row.group.title, 2),
+                ...row.items.map((i) =>
+                  node('item', i.id, i.title, 3, i.lifecycle === 'current' ? 'CURRENT' : undefined),
+                ),
+              ],
+        )}
+      </ul>
+    </nav>
   );
 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## M3 — 2026-11-10 — Scheduling + Master
+
+- domain: schedule engine (`calculateSchedule`, `classifyOffset`) with Planned / Projected / Actual, Strict / Sliding, fixed anchors, recovery-to-anchor, soft scheduled start; schedule operations (`setItemSchedule`, `setQueueTimingMode`, `setShowSchedule`, `transitionItemTimer`); locks with inheritance (`effectiveLock`, `setLock`, `releaseLock`, `requestUnlock`); actual start/end recorded by START/current/END; capabilities `schedule.*`, `lock.*`, `audit.read`;
+- application: `mutateQueue` as the single aggregate mutation path for Queue AND timer commands (lock gate, audited Emergency Override, audit records in the same transaction); new commands `item.setSchedule`, `queue.setTimingMode`, `show.setSchedule`, `lock.set`, `lock.release`, `lock.requestUnlock`; `getAuditTrail`;
+- contracts: schedule/lock/audit DTOs, `override` envelope, error `locked`;
+- db: migrations `0003_scheduling_locks`, `0004_audit_sequence`; locks, unlock requests and audit in `saveQueue`;
+- server: `GET /api/v1/shows/:showId/audit`, `423 locked`;
+- web: Master View (tree, rundown with planned/projected/shift/status/anchor/lock, inspector with Planned/Projected/Actual, locks, timing settings, audit), Operator schedule bar and schedule facts, `/edit` → `/master`;
+- tests: 286 unit/component, 16 PostgreSQL integration, 8 Playwright E2E (M3 flow + scheduled warning);
+- docs: scheduling/lock/audit implementation, API/realtime/security/data-model M3 sections, OPEN_QUESTIONS #6-8 baselines and #38-42.
+
 ## M2 — 2026-11-09 — Queue operations
 
 - review: M2 approved; OPEN_QUESTIONS #34-37 resolved (Next skips completed items; Note title may show on the Speaker Board, `notes` never; Group collapse is local UI state; `on_previous_end` stays a Queue Item property).

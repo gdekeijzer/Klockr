@@ -41,6 +41,7 @@ function services(clock: ManualClock): ShowServiceDeps {
     timers: store,
     queues: store,
     grants: store,
+    audit: store,
     locator: store,
     tokens: new FakeTokenService(randomUUID().slice(0, 8)),
     ids: { uuid: () => randomUUID() },

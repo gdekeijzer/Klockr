@@ -2,7 +2,33 @@
 
 ## Phase
 
-**M2 complete and approved (2026-11-09) — Queue operations.** OPEN_QUESTIONS #34-37 resolved in the review.
+**M3 complete (2026-11-10) — Scheduling + Master. Awaiting review before M4.** (Branch `feature/m3-scheduling-master`.)
+
+## M3 delivered
+
+- three explicit time layers: Planned (persisted, only changed by planning edits), Projected (derived by the pure engine `calculateSchedule`), Actual (`actualStartAt` on first START / becoming current without timer, `actualEndAt` on first END; never rewritten)
+- timing modes Strict / Sliding: Show default + Queue override, visible source
+- Show offset with ±30 s tolerance (AHEAD blue, ON TIME green, BEHIND amber, severe red above a configurable 5 min), hysteresis against flicker
+- fixed anchors with recovery-to-anchor (separate from the Show offset), ANCHOR RISK / ANCHOR MISSED; nothing is shortened automatically
+- soft scheduled start (`startMode = scheduled`): `SHOULD HAVE STARTED mm:ss AGO`, never auto-started
+- live +/- time immediately moves the projection; calm presentation (no row reordering, shift chips, `UPDATED ±mm:ss` markers)
+- Master View `/show/<id>/master`: structure tree, dense rundown (planned vs projected, duration, shift, status, anchors, locks), inspector with Planned/Projected/Actual, schedule edit, lock state, Show/Queue timing settings and audit trail; the M2 Queue Editor is integrated (`/edit` redirects)
+- Operator View: schedule bar (mode, Show offset, next fixed anchor + recovery), planned/actual/projected on Current, planned/projected start and soft warning on Next
+- locks on Show/Queue/Group/Item with inheritance, Request Unlock, permission-gated and audited Emergency Override; locks never block live transport
+- persistent audit trail (locks, overrides, planning, anchors, timing modes)
+- tests: 286 unit/component (domain 134, contracts 19, application 56, ui 18, server 25, worker 2, web 32), 16 PostgreSQL integration, 8 Playwright E2E
+
+## Known limitations after M3
+
+- Planned times are HH:MM on one Show date in the Show timezone (rundowns across midnight: OPEN_QUESTIONS #38).
+- Request Unlock has no notification channel yet; the anonymous owner holds every lock capability (#39, #40).
+- No pending/apply step for Sliding shifts; changes apply immediately and are marked calmly (#6).
+- No timeline view yet (list only); one Show with one Program Queue in Master.
+- Hard scheduled auto-start, automatic recovery and shortening are intentionally absent.
+
+## M2 (approved 2026-11-09) — Queue operations
+
+OPEN_QUESTIONS #34-37 resolved in the review.
 
 ## M2 delivered
 
@@ -125,9 +151,9 @@
 
 ## Next milestone
 
-**M3 — Scheduling + Master** (see `ROADMAP.md`). Start only on explicit instruction.
+**M4 — Boards + multi-queue** (see `ROADMAP.md`). Start only on explicit instruction; review M3 and OPEN_QUESTIONS #38-42 first.
 
-## Decisions that do not block M3
+## Decisions that do not block M4
 
 - concrete magic-link/auth library;
 - transactional email provider;

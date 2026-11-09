@@ -27,6 +27,7 @@ import {
   type Layout,
   type LayoutEntry,
 } from './order';
+import { pruneLocks } from '../lock/effective';
 import { validateThresholds } from './thresholds';
 
 /**
@@ -46,20 +47,29 @@ export interface OperationContext {
   readonly newId: () => string;
 }
 
-const notFound = (reason: string) => err({ code: 'not_found', reason } as const);
-const invalid = (reason: string) => err({ code: 'invalid_transition', reason } as const);
-const badInput = (reason: string) => err({ code: 'validation_failed', reason } as const);
+export const notFound = (reason: string) => err({ code: 'not_found', reason } as const);
+export const invalid = (reason: string) => err({ code: 'invalid_transition', reason } as const);
+export const badInput = (reason: string) => err({ code: 'validation_failed', reason } as const);
 
-function commit(agg: QueueAggregate): QueueAggregate {
+/** Every accepted change of the aggregate increments the Queue revision by exactly one. */
+export function commit(agg: QueueAggregate): QueueAggregate {
   return { ...agg, queue: { ...agg.queue, revision: agg.queue.revision + 1 } };
 }
 
-function touchItem(item: QueueItem, patch: Partial<QueueItem>, now: EpochMs): QueueItem {
+export function touchItem(item: QueueItem, patch: Partial<QueueItem>, now: EpochMs): QueueItem {
   return { ...item, ...patch, updatedAt: now, revision: item.revision + 1 };
 }
 
-function replaceItem(agg: QueueAggregate, item: QueueItem): QueueAggregate {
+export function replaceItem(agg: QueueAggregate, item: QueueItem): QueueAggregate {
   return { ...agg, items: agg.items.map((i) => (i.id === item.id ? item : i)) };
+}
+
+/**
+ * An item without timer actually starts when it becomes current (a timed item starts with its
+ * timer's first START). Only the first time: actuals are never rewritten.
+ */
+function beginsWhenCurrent(item: QueueItem): boolean {
+  return item.timer === null && item.actualStartAt === null;
 }
 
 const isLive = (timer: TimerState | null) =>
@@ -219,6 +229,11 @@ export function addItem(
     startMode: input.startMode ?? 'manual',
     warning: null,
     timer: timer.value,
+    plannedStartAt: null,
+    plannedDurationMs: null,
+    fixedAnchor: false,
+    actualStartAt: null,
+    actualEndAt: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
     revision: 0,
@@ -316,7 +331,9 @@ export function deleteItem(
   }
   if (isLive(item.timer)) return invalid('stop the timer before deleting the item');
   const remaining = { ...agg, items: agg.items.filter((i) => i.id !== item.id) };
-  return ok(commit(applyLayout(remaining, withoutItem(layoutOf(agg), item.id), ctx.now)));
+  return ok(
+    commit(pruneLocks(applyLayout(remaining, withoutItem(layoutOf(agg), item.id), ctx.now))),
+  );
 }
 
 /** A fresh copy of an item: new id, not completed, idle timer with the same configuration. */
@@ -330,6 +347,11 @@ function copyItem(item: QueueItem, groupId: GroupId | null, ctx: OperationContex
     groupId,
     completedAt: null,
     timer: timer?.ok ? timer.value : null,
+    // A copy is a new occurrence: no actuals; an explicit planned time / anchor is not copied.
+    plannedStartAt: null,
+    fixedAnchor: false,
+    actualStartAt: null,
+    actualEndAt: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
     revision: 0,
@@ -420,7 +442,17 @@ export function setCurrent(
   if (!item) return notFound('item not found');
   if (!item.active) return invalid('an inactive item cannot become current; activate it first');
   if (agg.queue.currentItemId === item.id) return ok(agg);
-  const live = item.completedAt === null ? item : touchItem(item, { completedAt: null }, ctx.now);
+  const live =
+    item.completedAt === null && !beginsWhenCurrent(item)
+      ? item
+      : touchItem(
+          item,
+          {
+            completedAt: null,
+            actualStartAt: beginsWhenCurrent(item) ? ctx.now : item.actualStartAt,
+          },
+          ctx.now,
+        );
   const updated = replaceItem(agg, live);
   return ok(commit({ ...updated, queue: { ...updated.queue, currentItemId: item.id } }));
 }
@@ -464,7 +496,15 @@ export function endItem(
     const stopped = stopTimer(timer, ctx.now);
     if (stopped.ok) timer = stopped.value;
   }
-  const ended = touchItem(item, { completedAt: item.completedAt ?? ctx.now, timer }, ctx.now);
+  const ended = touchItem(
+    item,
+    {
+      completedAt: item.completedAt ?? ctx.now,
+      actualEndAt: item.actualEndAt ?? ctx.now,
+      timer,
+    },
+    ctx.now,
+  );
   let result = replaceItem(agg, ended);
 
   if (!input.advance) {
@@ -491,8 +531,11 @@ export function endItem(
         startedNext = true;
       }
     }
-    if (nextTimer !== next.timer)
-      result = replaceItem(result, touchItem(next, { timer: nextTimer }, ctx.now));
+    const actualStartAt =
+      startedNext || beginsWhenCurrent(next) ? (next.actualStartAt ?? ctx.now) : next.actualStartAt;
+    if (nextTimer !== next.timer || actualStartAt !== next.actualStartAt) {
+      result = replaceItem(result, touchItem(next, { timer: nextTimer, actualStartAt }, ctx.now));
+    }
   }
   const currentItemId = next?.id ?? null;
   return ok({
@@ -569,7 +612,7 @@ export function deleteGroup(
     items: agg.items.filter((i) => i.groupId !== group.id),
   };
   const layout = layoutOf(agg).filter((e) => !(e.kind === 'group' && e.id === group.id));
-  return ok(commit(applyLayout(remaining, layout, ctx.now)));
+  return ok(commit(pruneLocks(applyLayout(remaining, layout, ctx.now))));
 }
 
 /** Duplicate a Group with fresh copies of its children, directly after the original. */

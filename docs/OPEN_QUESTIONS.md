@@ -15,9 +15,9 @@ These questions are deliberately deferred. Claude must not silently invent produ
 
 ## Scheduling
 
-6. In Sliding mode, which live changes auto-apply projected shifts vs enter `SHIFT PENDING`?
-7. Exact fixed-anchor overlap policy when preceding projected content reaches/passes the anchor.
-8. Whether/where hard scheduled start is exposed in V1.
+6. In Sliding mode, which live changes auto-apply projected shifts vs enter `SHIFT PENDING`? — **M3 baseline:** every live change recalculates the projection immediately (calculate immediately, present calmly): rows never reorder, shifted items show a shift chip (projected vs planned) and an `UPDATED ±mm:ss` marker for a few seconds. No pending/apply step yet; revisit when linked queues arrive (M4/M5).
+7. Exact fixed-anchor overlap policy when preceding projected content reaches/passes the anchor. — **M3 baseline:** the anchor keeps its planned time (never projected earlier); arriving late pushes the anchor's projected start; KLOCKR reports `mm:ss TO RECOVER` (risk, amber) while ending/skipping remaining items could still make it, and `ANCHOR MISSED` (red) when not. Nothing is shortened automatically.
+8. Whether/where hard scheduled start is exposed in V1. — **M3:** not exposed. Only soft scheduled start (`startMode = scheduled`: `SHOULD HAVE STARTED mm:ss AGO`, never auto-started).
 
 ## Current/multi-queue model
 
@@ -80,3 +80,11 @@ Remaining:
 35. ~~Note items on the Speaker Board~~ — **Resolved for M2:** a standalone Note Queue Item (no timer) that is Current may show its Queue Item title (and subtitle) on the Speaker Board, without timer. The `notes` property of any Queue Item is operator/internal data and is never sent to the Speaker Board. Audience/visibility policies follow in M4.
 36. ~~Group collapse state~~ — **Resolved:** collapsed/expanded is local UI state per browser; it is not part of authoritative Show State and is not persisted.
 37. ~~"On previous END" in M2~~ — **Resolved:** `startMode = on_previous_end` belongs in M2 because END + NEXT may only start the next timer automatically when explicitly configured. It stays a plain Queue Item property; no extra object, type or hierarchy.
+
+## Raised during M3 (Scheduling + Master) — baseline implemented, confirm in review
+
+38. **Midnight.** Planned times are entered as HH:MM on one Show date in the Show timezone. Rundowns crossing midnight need a per-item date (not in the UI yet; the model stores absolute UTC instants, so this is a UI extension only).
+39. **Request Unlock delivery.** Requests are persisted, shown on the lock and audited, but there is no notification channel (and with only the anonymous owner the requester and the lock owner are the same person). Decide the delivery/UX once role links/accounts exist.
+40. **Who has `lock.override` without `lock.manage`?** The anonymous owner holds all lock capabilities. Override is fully permission-gated and audited (tested with a restricted actor), but a role that may override yet not unlock arrives only with role links/accounts.
+41. **Strict when running ahead.** Baseline: in Strict an item with an explicit planned start is never projected earlier than planned (the show waits for the plan); chained items and Sliding flow earlier. Confirm.
+42. **Planned duration of timed items.** Baseline: the configured timer duration is the planned duration (one value; changing it is a planning edit and audited). A separate planned duration next to the timer duration is not introduced.

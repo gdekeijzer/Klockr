@@ -40,14 +40,22 @@ describe('grantPermits', () => {
     expect(grantPermits(boardShare, 'show.read', { kind: 'show', showId: show }, 1)).toBe(false);
   });
 
-  it.each(['queue.read', 'queue.manage', 'item.control', 'show.manage'] as const)(
-    'owner has %s on its own Show; a board share never has it',
-    (permission) => {
-      expect(grantPermits(owner, permission, { kind: 'show', showId: show }, 1)).toBe(true);
-      expect(grantPermits(owner, permission, { kind: 'show', showId: other }, 1)).toBe(false);
-      expect(grantPermits(boardShare, permission, { kind: 'show', showId: show }, 1)).toBe(false);
-    },
-  );
+  it.each([
+    'queue.read',
+    'queue.manage',
+    'item.control',
+    'show.manage',
+    'schedule.read',
+    'schedule.manage',
+    'lock.manage',
+    'lock.request',
+    'lock.override',
+    'audit.read',
+  ] as const)('owner has %s on its own Show; a board share never has it', (permission) => {
+    expect(grantPermits(owner, permission, { kind: 'show', showId: show }, 1)).toBe(true);
+    expect(grantPermits(owner, permission, { kind: 'show', showId: other }, 1)).toBe(false);
+    expect(grantPermits(boardShare, permission, { kind: 'show', showId: show }, 1)).toBe(false);
+  });
 
   it('board share is scoped to one Board', () => {
     expect(

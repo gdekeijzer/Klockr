@@ -14,7 +14,7 @@ import styles from './show.module.css';
  */
 export function ShowFrame(props: {
   showId: string;
-  view: 'operator' | 'editor';
+  view: 'operator' | 'master';
   rt: ShowRealtime;
   now: number;
   children: ReactNode;
@@ -49,10 +49,10 @@ export function ShowFrame(props: {
           </Link>
           <Link
             className={styles.tab}
-            href={`/show/${showId}/edit`}
-            aria-current={view === 'editor' ? 'page' : undefined}
+            href={`/show/${showId}/master`}
+            aria-current={view === 'master' ? 'page' : undefined}
           >
-            Queue editor
+            Master
           </Link>
         </nav>
         <div className={styles.showName}>

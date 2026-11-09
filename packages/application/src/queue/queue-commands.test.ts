@@ -50,6 +50,7 @@ describe('Queue commands (application layer)', () => {
       queues: store,
       timers: store,
       grants: store,
+      audit: store,
       locator: store,
       tokens: new FakeTokenService(),
       ids: new SequentialIds(),

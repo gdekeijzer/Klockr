@@ -1,12 +1,14 @@
-import type { Metadata } from 'next';
-import { QueueEditor } from './queue-editor';
+import { redirect } from 'next/navigation';
 
-export const metadata: Metadata = {
-  title: 'Queue editor — KLOCKR',
-  robots: { index: false, follow: false },
-};
-
-export default async function QueueEditorPage({ params }: { params: Promise<{ showId: string }> }) {
+/**
+ * The M2 Queue Editor became part of the Master View (M3): one editing system for structure,
+ * content and planning. This route stays as a permanent alias so links and bookmarks keep working.
+ */
+export default async function QueueEditorAlias({
+  params,
+}: {
+  params: Promise<{ showId: string }>;
+}) {
   const { showId } = await params;
-  return <QueueEditor showId={showId} />;
+  redirect(`/show/${showId}/master`);
 }

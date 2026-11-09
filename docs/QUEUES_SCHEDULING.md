@@ -109,3 +109,24 @@ Recommended model:
 **Safety rules.** The current item cannot be deleted or made inactive; an item or Group with a running/paused timer cannot be deleted; an inactive item cannot be made current (activate it first). Drag & drop only moves structure; it never changes current/next state or timers by itself (next is simply re-derived).
 
 **Consistency boundary.** The Queue aggregate (Queue, Groups, Items, item timers and the Show warning default it inherits) is saved atomically with compare-and-set on `queues.revision` plus per-timer compare-and-set for every timer the command changes. END + NEXT (complete + stop current timer + move current + optional start of the next timer) is therefore all-or-nothing.
+
+## Implementation (M3)
+
+**Time layers.** Persisted: explicit `plannedStartAt` (UTC), `plannedDurationMs` (items without timer only; for timed items the configured timer duration is the planned duration), `fixedAnchor`, `actualStartAt`, `actualEndAt`, Show `timingMode` / `timeZone` / `scheduleDate` / `toleranceMs` (30 s) / `severeBehindMs` (5 min), Queue `timingMode` override. Derived (never stored): chained planned starts (after the previous active item's planned end), planned ends, projected starts/ends, shifts, the Show offset, statuses, recovery to the next anchor, anchor risk/missed and soft-start warnings. Engine: `calculateSchedule(aggregate, now)` in `packages/domain/src/schedule/engine.ts`; clients run the same pure function on the authoritative snapshot (like `deriveTimer`), so there are no schedule ticks.
+
+**Projection rules.** Completed items use their actuals; items passed over by a jump forward are skipped; the current item ends at `start + paused + duration + adjustment` (never before now; a stopped-but-not-ENDed item ends now); upcoming items follow the previous projected end and never start before now. Nothing is ever shortened.
+- Strict: an item with an explicit planned start never projects earlier than planned (the show waits for the plan). Planned stays the operational reference.
+- Sliding: projected times follow live deviations in both directions.
+- Both: a fixed anchor never projects earlier than its planned start; lateness propagates.
+
+**Show offset** = projected - planned of the relevant milestone: the current item's END once it has started (otherwise its start), or the first upcoming item's start when nothing is current. ON TIME within ±tolerance, AHEAD below, BEHIND above, severe (red) above `severeBehindMs`; a small hysteresis prevents flicker at the edges.
+
+**Recovery to anchor** = projected arrival at the next fixed anchor (end of the preceding items) - the anchor's planned start; a separate value from the Show offset. `risk` while it is ≤ the time still recoverable (remaining current + not-started items before the anchor), `missed` when not.
+
+**Calm presentation.** Every relevant transition (START/STOP/adjust, END, current change, planning edit, reorder, timing mode) commits one Queue revision and one `queue.state`; clients recompute and mark shifted rows (`UPDATED ±mm:ss`, shift chip) without ever reordering rows.
+
+**Locks.** Structure/configuration locks on Show, Queue, Group or Item (`locks` table, part of the Queue aggregate). Effective lock = nearest lock on the target or a parent (item → group → queue → show). Locks block structure, content, planning, timing-mode and duration edits (incl. `timer.configure`); they never block START/PAUSE/RESUME/STOP, END/NEXT or set current. Request Unlock is persisted against the effective lock and resolved when that lock is released. Emergency Override = resend the blocked command with `override: { reason }`; needs `lock.override`; audited with actor, time, resource, reason, command and the lock; the lock itself stays.
+
+**Audit.** `audit_events` (append-only, same transaction as the change): `lock.set`, `lock.release`, `lock.request_unlock`, `lock.override`, `schedule.update` (planned start/duration, anchor flag, timer duration), `anchor.update`, `timing_mode.update`, `schedule.settings`.
+
+**Master / Queue Editor boundary.** The M2 Queue Editor is now part of the Master View (`/show/<id>/master`): one editing system. `/show/<id>/edit` permanently redirects there.

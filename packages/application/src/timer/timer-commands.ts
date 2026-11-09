@@ -74,7 +74,7 @@ export interface TimerCommandDeps {
 
 type Transition = (state: TimerState, now: EpochMs) => TimerResult;
 
-function transitionFor(command: TimerCommand): Transition {
+export function transitionFor(command: TimerCommand): Transition {
   switch (command.type) {
     case 'timer.start':
       return startTimer;
@@ -95,7 +95,7 @@ function transitionFor(command: TimerCommand): Transition {
   }
 }
 
-function fromTimerError(error: TimerError): CommandResult<never> {
+export function fromTimerError(error: TimerError): CommandResult<never> {
   switch (error.code) {
     case 'invalid_transition':
       return appError(

@@ -44,6 +44,7 @@ function services(clock: ManualClock): ShowServiceDeps & { store: PgShowStore } 
     queues: store,
     timers: store,
     grants: store,
+    audit: store,
     locator: store,
     tokens,
     ids: { uuid: () => randomUUID() },
@@ -237,7 +238,8 @@ describe('PostgreSQL Queue persistence (requires PostgreSQL)', () => {
 
     // Nothing of the END + NEXT was written.
     const after = await load();
-    expect(after.queue.revision).toBe(prev.queue.revision);
+    // Only the concurrent pause was committed (timer transitions are Queue commits since M3).
+    expect(after.queue.revision).toBe(prev.queue.revision + 1);
     expect(after.queue.currentItemId).toBe(a);
     expect(after.items.find((i) => i.id === a)?.completedAt).toBeNull();
     expect(after.items.find((i) => i.id === a)?.timer?.status).toBe('paused');

@@ -22,6 +22,20 @@
       "when": 1794231427675,
       "tag": "0002_queue_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794239542875,
+      "tag": "0003_scheduling_locks",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794239636637,
+      "tag": "0004_audit_sequence",
+      "breakpoints": true
     }
   ]
 }

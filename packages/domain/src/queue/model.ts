@@ -1,4 +1,6 @@
 import type { GroupId, QueueId, QueueItemId, ShowId } from '../ids';
+import type { Lock, UnlockRequest } from '../lock';
+import type { ShowSchedule, TimingMode } from '../schedule/settings';
 import type { EpochMs } from '../time';
 import type { TimerState, TimerThresholds } from '../timer';
 
@@ -25,6 +27,8 @@ export interface Queue {
   readonly currentItemId: QueueItemId | null;
   /** Queue-level override of the Show's warning thresholds; null inherits the Show default. */
   readonly warning: TimerThresholds | null;
+  /** Queue-level override of the Show's timing mode; null inherits. */
+  readonly timingMode: TimingMode | null;
   /**
    * Optimistic-concurrency revision of the Queue as a whole (structure, current position and
    * item lifecycle). Increments by one on every accepted Queue command. Timer transitions have
@@ -47,9 +51,11 @@ export interface Group {
 /**
  * How an item's timer starts. `manual` (default): only an explicit START. `on_previous_end`
  * ("On previous END", FUNCTIONAL_DESIGN §18): END + NEXT that makes this item current also
- * starts its timer. Nothing else ever starts a timer implicitly.
+ * starts its timer. `scheduled` (M3): soft scheduled start — the item is expected at its planned
+ * start; KLOCKR signals when it should have started but NEVER starts it on a clock time.
+ * Nothing else ever starts a timer implicitly.
  */
-export type StartMode = 'manual' | 'on_previous_end';
+export type StartMode = 'manual' | 'on_previous_end' | 'scheduled';
 
 /** Universal Queue Item. Every property beyond identity/title/order is optional. */
 export interface QueueItem {
@@ -74,6 +80,22 @@ export interface QueueItem {
   readonly warning: TimerThresholds | null;
   /** Optional timer capability. An item without timer (e.g. a note) is fully valid. */
   readonly timer: TimerState | null;
+  /**
+   * Planned (baseline) start, only when explicitly set by a planning edit. Null = chained after
+   * the previous item's planned end (derived). Live operation never writes this field.
+   */
+  readonly plannedStartAt: EpochMs | null;
+  /**
+   * Planned duration for items WITHOUT timer (e.g. a note = 0, a plain break). For timed items
+   * the configured timer duration is the planned duration and this stays null.
+   */
+  readonly plannedDurationMs: number | null;
+  /** Fixed-time anchor: projection never moves its start earlier than its planned start. */
+  readonly fixedAnchor: boolean;
+  /** Actual start: first START of its timer (or becoming current, without timer). Never rewritten. */
+  readonly actualStartAt: EpochMs | null;
+  /** Actual end: first END. Never rewritten. */
+  readonly actualEndAt: EpochMs | null;
   readonly createdAt: EpochMs;
   readonly updatedAt: EpochMs;
   /** Increments whenever this item's own data (incl. position/lifecycle) changes. */
@@ -88,6 +110,12 @@ export interface QueueAggregate {
   readonly showId: ShowId;
   /** Show-level default warning thresholds (top of the inheritance chain). */
   readonly showWarning: TimerThresholds;
+  /** Show-level schedule settings (timing mode default, timezone, date, tolerance). */
+  readonly showSchedule: ShowSchedule;
+  /** Locks on the Show, this Queue, its Groups and Items (part of the consistency boundary). */
+  readonly locks: readonly Lock[];
+  /** Open (unresolved) unlock requests for those locks. */
+  readonly unlockRequests: readonly UnlockRequest[];
   readonly queue: Queue;
   readonly groups: readonly Group[];
   readonly items: readonly QueueItem[];

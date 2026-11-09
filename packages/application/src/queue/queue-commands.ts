@@ -19,6 +19,14 @@ import {
   setQueueWarning,
   setShowWarning,
   updateItem,
+  setItemSchedule,
+  setQueueTimingMode,
+  setShowSchedule,
+  setLock,
+  releaseLock,
+  requestUnlock,
+  type ActorRef,
+  type ShowSchedule,
   type Clock,
   type OperationContext,
   type Permission,
@@ -28,8 +36,7 @@ import {
   type ShowId,
 } from '@klockr/domain';
 import type { CommandContext } from '../command';
-import { appError, type CommandResult } from '../errors';
-import { stableStringify } from '../idempotency';
+import type { AppError, CommandResult } from '../errors';
 import type {
   Authorizer,
   EventPublisher,
@@ -38,6 +45,8 @@ import type {
   QueueRepository,
   ShowRepository,
 } from '../ports';
+import { lockTargetsFor } from './locks';
+import { actorRef, mutateQueue, type MutationResult } from './mutate';
 
 /** Queue commands are exactly the validated boundary DTOs (one shape for UI and API). */
 export type QueueCommand = QueueCommandDto;
@@ -70,6 +79,15 @@ export function permissionFor(type: QueueCommandType): Permission {
       return 'item.control';
     case 'show.setWarning':
       return 'show.manage';
+    case 'item.setSchedule':
+    case 'queue.setTimingMode':
+    case 'show.setSchedule':
+      return 'schedule.manage';
+    case 'lock.set':
+    case 'lock.release':
+      return 'lock.manage';
+    case 'lock.requestUnlock':
+      return 'lock.request';
     case 'item.add':
     case 'item.update':
     case 'item.delete':
@@ -95,7 +113,7 @@ const plain = (r: QueueResult): Applied => (r.ok ? ok({ aggregate: r.value, crea
 export function applyQueueCommand(
   agg: QueueAggregate,
   command: QueueCommand,
-  ctx: OperationContext,
+  ctx: OperationContext & { readonly actor: ActorRef },
 ): Applied {
   switch (command.type) {
     case 'item.add': {
@@ -187,24 +205,168 @@ export function applyQueueCommand(
       return plain(setQueueWarning(agg, { warning: command.payload.warning }));
     case 'show.setWarning':
       return plain(setShowWarning(agg, { warning: command.payload.warning }));
+    case 'item.setSchedule': {
+      const { queueItemId, ...patch } = command.payload;
+      return plain(setItemSchedule(agg, { id: QueueItemId(queueItemId), patch }, ctx));
+    }
+    case 'queue.setTimingMode':
+      return plain(setQueueTimingMode(agg, command.payload.mode));
+    case 'show.setSchedule': {
+      const patch = Object.fromEntries(
+        Object.entries(command.payload).filter(([, v]) => v !== undefined),
+      ) as Partial<ShowSchedule>;
+      return plain(setShowSchedule(agg, patch));
+    }
+    case 'lock.set': {
+      const r = setLock(agg, command.payload.target, { ...ctx, actor: ctx.actor });
+      return r.ok ? ok({ aggregate: r.value.aggregate, createdId: r.value.lock.id }) : r;
+    }
+    case 'lock.release': {
+      const r = releaseLock(agg, command.payload.target);
+      return r.ok ? ok({ aggregate: r.value.aggregate, createdId: null }) : r;
+    }
+    case 'lock.requestUnlock': {
+      const r = requestUnlock(agg, command.payload.target, command.payload.reason ?? null, {
+        ...ctx,
+        actor: ctx.actor,
+      });
+      return r.ok ? ok({ aggregate: r.value.aggregate, createdId: r.value.request.id }) : r;
+    }
   }
 }
 
-function fromQueueError(error: QueueError): CommandResult<never> {
-  return appError(error.code, error.reason);
-}
-
-/** Without an explicit expectedRevision, a lost compare-and-set race is re-evaluated this often. */
-const MAX_ATTEMPTS = 3;
+type AuditDraft = NonNullable<MutationResult<unknown>['audit']>[number];
 
 /**
- * The single entry point for Queue state changes, for UI and external API alike. Order:
- * permission -> idempotent replay -> load -> expected revision -> pure domain operation ->
- * atomic compare-and-set save -> remember outcome -> publish -> record activity.
- *
- * When the caller did not pin `expectedRevision`, a concurrent write (e.g. a timer transition
- * racing an END) makes the command re-evaluate against the fresh state, exactly as if it had
- * arrived a moment later; domain guards (e.g. "END only the current item") still apply.
+ * Audit trail for operationally important changes: locks, unlock requests, planned schedule
+ * edits (incl. planned durations), fixed anchors and timing modes. (Emergency Overrides are
+ * audited by `mutateQueue` itself.)
+ */
+export function auditFor(
+  command: QueueCommand,
+  prev: QueueAggregate,
+  next: QueueAggregate,
+): AuditDraft[] {
+  const itemOf = (agg: QueueAggregate, id: string) => agg.items.find((i) => i.id === id);
+  switch (command.type) {
+    case 'item.setSchedule': {
+      const before = itemOf(prev, command.payload.queueItemId);
+      const after = itemOf(next, command.payload.queueItemId);
+      if (!before || !after) return [];
+      const pick = (i: typeof before) => ({
+        plannedStartAt: i.plannedStartAt,
+        plannedDurationMs: i.plannedDurationMs,
+        fixedAnchor: i.fixedAnchor,
+      });
+      const records: AuditDraft[] = [
+        {
+          action: 'schedule.update',
+          resource: { kind: 'item', id: after.id },
+          details: { title: after.title, before: pick(before), after: pick(after) },
+        },
+      ];
+      if (before.fixedAnchor !== after.fixedAnchor) {
+        records.push({
+          action: 'anchor.update',
+          resource: { kind: 'item', id: after.id },
+          details: {
+            title: after.title,
+            fixedAnchor: after.fixedAnchor,
+            plannedStartAt: after.plannedStartAt,
+          },
+        });
+      }
+      return records;
+    }
+    case 'item.update': {
+      if (command.payload.patch.durationMs === undefined) return [];
+      const before = itemOf(prev, command.payload.queueItemId);
+      const after = itemOf(next, command.payload.queueItemId);
+      const from = before?.timer?.durationMs ?? null;
+      const to = after?.timer?.durationMs ?? null;
+      if (!after || from === to) return [];
+      return [
+        {
+          action: 'schedule.update',
+          resource: { kind: 'item', id: after.id },
+          details: { title: after.title, durationMs: { before: from, after: to } },
+        },
+      ];
+    }
+    case 'queue.setTimingMode':
+      return [
+        {
+          action: 'timing_mode.update',
+          resource: { kind: 'queue', id: next.queue.id },
+          details: { before: prev.queue.timingMode, after: next.queue.timingMode },
+        },
+      ];
+    case 'show.setSchedule': {
+      const records: AuditDraft[] = [];
+      if (prev.showSchedule.timingMode !== next.showSchedule.timingMode) {
+        records.push({
+          action: 'timing_mode.update',
+          resource: { kind: 'show', id: next.showId },
+          details: { before: prev.showSchedule.timingMode, after: next.showSchedule.timingMode },
+        });
+      }
+      const { timingMode: _a, ...restBefore } = prev.showSchedule;
+      const { timingMode: _b, ...restAfter } = next.showSchedule;
+      if (JSON.stringify(restBefore) !== JSON.stringify(restAfter)) {
+        records.push({
+          action: 'schedule.settings',
+          resource: { kind: 'show', id: next.showId },
+          details: { before: restBefore, after: restAfter },
+        });
+      }
+      return records;
+    }
+    case 'lock.set':
+      return [{ action: 'lock.set', resource: command.payload.target, details: {} }];
+    case 'lock.release': {
+      const released = prev.locks.find(
+        (l) =>
+          l.target.kind === command.payload.target.kind &&
+          l.target.id === command.payload.target.id,
+      );
+      const resolved = prev.unlockRequests
+        .filter((r) => r.lockId === released?.id)
+        .map((r) => r.id);
+      return [
+        {
+          action: 'lock.release',
+          resource: command.payload.target,
+          details: { lockId: released?.id ?? null, resolvedUnlockRequests: resolved },
+        },
+      ];
+    }
+    case 'lock.requestUnlock': {
+      const request = next.unlockRequests.at(-1);
+      return [
+        {
+          action: 'lock.request_unlock',
+          resource: command.payload.target,
+          details: {
+            reason: request?.reason ?? null,
+            lockId: request?.lockId ?? null,
+            requestId: request?.id ?? null,
+          },
+        },
+      ];
+    }
+    default:
+      return [];
+  }
+}
+
+function fromQueueError(error: QueueError): AppError {
+  return { code: error.code, message: error.reason };
+}
+
+/**
+ * Entry point for Queue commands (UI and external API alike). Runs through `mutateQueue`:
+ * capability check, idempotency, expected Queue revision, lock gate / audited Emergency Override,
+ * pure domain operation, atomic save with audit records, publish.
  */
 export async function executeQueueCommand(
   showId: ShowId,
@@ -212,77 +374,36 @@ export async function executeQueueCommand(
   context: CommandContext,
   deps: QueueCommandDeps,
 ): Promise<CommandResult<QueueCommandOutcome>> {
-  const allowed = await deps.authorizer.can(context.actor, permissionFor(command.type), {
-    kind: 'show',
-    id: showId,
-  });
-  if (!allowed) return appError('forbidden', 'Not permitted to change this Queue');
-
-  const scope = `${context.actor.kind}:${context.actor.id}`;
-  const fingerprint = stableStringify({ showId, type: command.type, payload: command.payload });
-  if (command.idempotencyKey !== undefined) {
-    const stored = await deps.idempotency.find(scope, command.idempotencyKey);
-    if (stored) {
-      if (stored.fingerprint !== fingerprint) {
-        return appError('idempotency_conflict', 'Idempotency key was used for a different command');
-      }
-      return stored.result as CommandResult<QueueCommandOutcome>;
-    }
-  }
-
-  const show = await deps.shows.getShow(showId);
-  if (!show) return appError('not_found', 'Show not found');
-
-  for (let attempt = 1; ; attempt++) {
-    const prev = await deps.queues.loadQueue(show.primaryQueueId);
-    if (!prev) return appError('not_found', 'Queue not found');
-    if (
-      command.expectedRevision !== undefined &&
-      command.expectedRevision !== prev.queue.revision
-    ) {
-      return appError('revision_conflict', 'Queue has changed since it was read', {
-        expectedRevision: command.expectedRevision,
-        actualRevision: prev.queue.revision,
-      });
-    }
-
-    const now = deps.clock.now();
-    const applied = applyQueueCommand(prev, command, { now, newId: () => deps.ids.uuid() });
-    if (!applied.ok) return fromQueueError(applied.error);
-    const { aggregate, createdId } = applied.value;
-
-    // A no-op (nothing changed) is a success without a write or event.
-    if (aggregate === prev) return ok({ aggregate, createdId });
-
-    const saved = await deps.queues.saveQueue(prev, aggregate);
-    if (!saved.ok) {
-      if (
-        saved.error.code === 'revision_conflict' &&
-        command.expectedRevision === undefined &&
-        attempt < MAX_ATTEMPTS
-      ) {
-        continue;
-      }
-      return saved;
-    }
-
-    const result = ok({ aggregate, createdId });
-    if (command.idempotencyKey !== undefined) {
-      await deps.idempotency.remember(scope, command.idempotencyKey, { fingerprint, result });
-    }
-    try {
-      await deps.events.publish({
-        type: 'queue.changed',
-        commandId: command.commandId,
-        commandType: command.type,
-        showId,
-        aggregate,
-        occurredAt: now,
-      });
-    } catch (error) {
-      deps.onPublishError?.(error);
-    }
-    await deps.shows.touch(showId, now);
-    return result;
-  }
+  const result = await mutateQueue<string | null>(
+    showId,
+    {
+      commandId: command.commandId,
+      commandType: command.type,
+      intent: command.payload,
+      idempotencyKey: command.idempotencyKey,
+      expectedRevision: command.expectedRevision,
+      permission: permissionFor(command.type),
+      lockTargets: (agg) => lockTargetsFor(agg, command),
+      override: command.override,
+      apply: (prev, now) => {
+        const applied = applyQueueCommand(prev, command, {
+          now,
+          newId: () => deps.ids.uuid(),
+          actor: actorRef(context.actor),
+        });
+        if (!applied.ok) return { ok: false, error: fromQueueError(applied.error) };
+        const { aggregate, createdId } = applied.value;
+        return ok({
+          aggregate,
+          value: createdId,
+          audit: aggregate === prev ? [] : auditFor(command, prev, aggregate),
+        });
+      },
+    },
+    context,
+    deps,
+  );
+  return result.ok
+    ? ok({ aggregate: result.value.aggregate, createdId: result.value.value })
+    : result;
 }

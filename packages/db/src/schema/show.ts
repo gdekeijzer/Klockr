@@ -8,6 +8,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  uniqueIndex,
   text,
   timestamp,
   uuid,
@@ -40,8 +41,15 @@ export const shows = pgTable(
     expiresAt: tstz('expires_at').notNull(),
     /** Show default warning thresholds (top of the inheritance chain). */
     warningRule: jsonb('warning_rule').$type<ThresholdRuleJson>().notNull().default(DEFAULT_RULE),
+    /** M3 schedule settings. Human times are entered in `time_zone` on `schedule_date`. */
+    timingMode: text('timing_mode').notNull().default('strict'),
+    timeZone: text('time_zone').notNull().default('UTC'),
+    scheduleDate: text('schedule_date'),
+    toleranceMs: integer('tolerance_ms').notNull().default(30_000),
+    severeBehindMs: integer('severe_behind_ms').notNull().default(300_000),
   },
   (t) => [
+    check('shows_timing_mode_check', sql`${t.timingMode} in ('strict', 'sliding')`),
     check('shows_ownership_check', sql`${t.ownership} in ('anonymous')`),
     index('shows_expires_at_idx').on(t.expiresAt),
   ],
@@ -65,8 +73,16 @@ export const queues = pgTable(
     warningRule: jsonb('warning_rule').$type<ThresholdRuleJson>(),
     /** Compare-and-set guard for the Queue aggregate (structure, current, lifecycle). */
     revision: integer('revision').notNull().default(0),
+    /** Queue override of the Show timing mode; null inherits. */
+    timingMode: text('timing_mode'),
   },
-  (t) => [index('queues_show_idx').on(t.showId)],
+  (t) => [
+    index('queues_show_idx').on(t.showId),
+    check(
+      'queues_timing_mode_check',
+      sql`${t.timingMode} is null or ${t.timingMode} in ('strict', 'sliding')`,
+    ),
+  ],
 );
 
 /** Real container of Queue Items within one Queue (one level, no nesting). */
@@ -109,6 +125,14 @@ export const queueItems = pgTable(
     startMode: text('start_mode').notNull().default('manual'),
     /** Item override of the inherited warning thresholds; null inherits. */
     warningRule: jsonb('warning_rule').$type<ThresholdRuleJson>(),
+    /** Planned (baseline) start, only when explicitly set; null = chained (derived). */
+    plannedStartAt: tstz('planned_start_at'),
+    /** Planned duration for items without timer (timed items use the timer duration). */
+    plannedDurationMs: bigint('planned_duration_ms', { mode: 'number' }),
+    fixedAnchor: boolean('fixed_anchor').notNull().default(false),
+    /** Actuals: written once by operational commands, never rewritten. */
+    actualStartAt: tstz('actual_start_at'),
+    actualEndAt: tstz('actual_end_at'),
     createdAt: tstz('created_at').notNull().defaultNow(),
     updatedAt: tstz('updated_at').notNull().defaultNow(),
     revision: integer('revision').notNull().default(0),
@@ -116,7 +140,10 @@ export const queueItems = pgTable(
   (t) => [
     index('queue_items_queue_idx').on(t.queueId),
     index('queue_items_group_idx').on(t.groupId),
-    check('queue_items_start_mode_check', sql`${t.startMode} in ('manual', 'on_previous_end')`),
+    check(
+      'queue_items_start_mode_check',
+      sql`${t.startMode} in ('manual', 'on_previous_end', 'scheduled')`,
+    ),
   ],
 );
 
@@ -200,4 +227,80 @@ export const idempotencyRecords = pgTable(
     createdAt: tstz('created_at').notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.scope, t.key] })],
+);
+
+const lockKind = (column: AnyPgColumn) => sql`${column} in ('show', 'queue', 'group', 'item')`;
+
+/**
+ * Structure/configuration locks. Part of the Queue aggregate (`queue_id`), so lock checks and
+ * the mutations they guard are committed together. One own lock per target.
+ */
+export const locks = pgTable(
+  'locks',
+  {
+    id: uuid('id').primaryKey(),
+    showId: uuid('show_id')
+      .notNull()
+      .references(() => shows.id, { onDelete: 'cascade' }),
+    queueId: uuid('queue_id')
+      .notNull()
+      .references(() => queues.id, { onDelete: 'cascade' }),
+    targetKind: text('target_kind').notNull(),
+    targetId: uuid('target_id').notNull(),
+    lockedAt: tstz('locked_at').notNull(),
+    lockedByKind: text('locked_by_kind').notNull(),
+    lockedById: text('locked_by_id').notNull(),
+  },
+  (t) => [
+    check('locks_target_kind_check', lockKind(t.targetKind)),
+    uniqueIndex('locks_target_uq').on(t.targetKind, t.targetId),
+    index('locks_queue_idx').on(t.queueId),
+  ],
+);
+
+/** Request Unlock records. Kept after resolution (`resolved_at`) for history. */
+export const unlockRequests = pgTable(
+  'unlock_requests',
+  {
+    id: uuid('id').primaryKey(),
+    showId: uuid('show_id')
+      .notNull()
+      .references(() => shows.id, { onDelete: 'cascade' }),
+    queueId: uuid('queue_id')
+      .notNull()
+      .references(() => queues.id, { onDelete: 'cascade' }),
+    lockId: uuid('lock_id').notNull(),
+    targetKind: text('target_kind').notNull(),
+    targetId: uuid('target_id').notNull(),
+    requestedAt: tstz('requested_at').notNull(),
+    requestedByKind: text('requested_by_kind').notNull(),
+    requestedById: text('requested_by_id').notNull(),
+    reason: text('reason'),
+    resolvedAt: tstz('resolved_at'),
+  },
+  (t) => [
+    check('unlock_requests_target_kind_check', lockKind(t.targetKind)),
+    index('unlock_requests_queue_idx').on(t.queueId),
+  ],
+);
+
+/** Append-only audit trail (locks, overrides, planning, anchors, timing modes). */
+export const auditEvents = pgTable(
+  'audit_events',
+  {
+    id: uuid('id').primaryKey(),
+    /** Insertion order (stable ordering for records with equal timestamps). */
+    seq: bigint('seq', { mode: 'number' }).generatedAlwaysAsIdentity(),
+    showId: uuid('show_id')
+      .notNull()
+      .references(() => shows.id, { onDelete: 'cascade' }),
+    at: tstz('at').notNull(),
+    actorKind: text('actor_kind').notNull(),
+    actorId: text('actor_id').notNull(),
+    action: text('action').notNull(),
+    resourceKind: text('resource_kind').notNull(),
+    resourceId: text('resource_id').notNull(),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull(),
+  },
+  (t) => [index('audit_events_show_at_idx').on(t.showId, t.at)],
 );

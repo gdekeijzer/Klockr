@@ -2,6 +2,7 @@ import {
   GrantAuthorizer,
   type EventPublisher,
   type GrantRepository,
+  type AuditRepository,
   type IdempotencyStore,
   type QueueRepository,
   type ShowRepository,
@@ -13,7 +14,11 @@ import { randomUUID } from 'node:crypto';
 import { NodeTokenService } from './infra/tokens';
 
 export interface Persistence {
-  readonly store: ShowRepository & QueueRepository & TimerRepository & GrantRepository;
+  readonly store: ShowRepository &
+    QueueRepository &
+    TimerRepository &
+    GrantRepository &
+    AuditRepository;
   readonly idempotency: IdempotencyStore;
 }
 
@@ -31,6 +36,7 @@ export function createServices(options: {
     timers: store,
     queues: store,
     grants: store,
+    audit: store,
     locator: store,
     idempotency,
     events: options.events,

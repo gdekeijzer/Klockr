@@ -1,6 +1,8 @@
 import {
   changedTimers,
   type AppError,
+  type AuditRecord,
+  type AuditRepository,
   type GrantRepository,
   type IdempotencyStore,
   type NewGrantRecord,
@@ -23,6 +25,11 @@ import {
   type EpochMs,
   type GrantKind,
   type Group,
+  type Lock,
+  type LockTargetKind,
+  type ShowSchedule,
+  type TimingMode,
+  type UnlockRequest,
   type QueueAggregate,
   type QueueItem,
   type QuickTimerShow,
@@ -34,11 +41,14 @@ import {
   type TimerStatus,
   type TimerThresholds,
 } from '@klockr/domain';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Database } from './client';
 import {
   accessGrants,
+  auditEvents,
   boards,
+  locks,
+  unlockRequests,
   idempotencyRecords,
   itemTimers,
   queueGroups,
@@ -89,6 +99,11 @@ function itemFromRow(row: ItemRow, timer: TimerRow | null): QueueItem {
     startMode: row.startMode as StartMode,
     warning: ruleOrNull(row.warningRule),
     timer: timer ? timerFromRow(timer) : null,
+    plannedStartAt: toMsOrNull(row.plannedStartAt),
+    plannedDurationMs: row.plannedDurationMs,
+    fixedAnchor: row.fixedAnchor,
+    actualStartAt: toMsOrNull(row.actualStartAt),
+    actualEndAt: toMsOrNull(row.actualEndAt),
     createdAt: toMs(row.createdAt),
     updatedAt: toMs(row.updatedAt),
     revision: row.revision,
@@ -109,6 +124,11 @@ function itemColumns(item: QueueItem) {
     completedAt: toDateOrNull(item.completedAt),
     startMode: item.startMode,
     warningRule: ruleToJsonOrNull(item.warning),
+    plannedStartAt: toDateOrNull(item.plannedStartAt),
+    plannedDurationMs: item.plannedDurationMs,
+    fixedAnchor: item.fixedAnchor,
+    actualStartAt: toDateOrNull(item.actualStartAt),
+    actualEndAt: toDateOrNull(item.actualEndAt),
     createdAt: toDate(item.createdAt),
     updatedAt: toDate(item.updatedAt),
     revision: item.revision,
@@ -204,12 +224,53 @@ function showFromRow(row: ShowRow): Show {
     lastActiveAt: toMs(row.lastActiveAt),
     expiresAt: toMs(row.expiresAt),
     warning: ruleFromJson(row.warningRule),
+    schedule: scheduleFromRow(row),
+  };
+}
+
+function scheduleFromRow(row: ShowRow): ShowSchedule {
+  return {
+    timingMode: row.timingMode as TimingMode,
+    timeZone: row.timeZone,
+    scheduleDate: row.scheduleDate,
+    toleranceMs: row.toleranceMs,
+    severeBehindMs: row.severeBehindMs,
+  };
+}
+
+function scheduleColumns(schedule: ShowSchedule) {
+  return {
+    timingMode: schedule.timingMode,
+    timeZone: schedule.timeZone,
+    scheduleDate: schedule.scheduleDate,
+    toleranceMs: schedule.toleranceMs,
+    severeBehindMs: schedule.severeBehindMs,
+  };
+}
+
+function lockFromRow(row: typeof locks.$inferSelect): Lock {
+  return {
+    id: row.id,
+    target: { kind: row.targetKind as LockTargetKind, id: row.targetId },
+    lockedAt: toMs(row.lockedAt),
+    lockedBy: { kind: row.lockedByKind, id: row.lockedById },
+  };
+}
+
+function requestFromRow(row: typeof unlockRequests.$inferSelect): UnlockRequest {
+  return {
+    id: row.id,
+    lockId: row.lockId,
+    target: { kind: row.targetKind as LockTargetKind, id: row.targetId },
+    requestedAt: toMs(row.requestedAt),
+    requestedBy: { kind: row.requestedByKind, id: row.requestedById },
+    reason: row.reason,
   };
 }
 
 /** PostgreSQL adapter for the Show/Queue/Timer/Grant persistence ports. */
 export class PgShowStore
-  implements ShowRepository, QueueRepository, TimerRepository, GrantRepository
+  implements ShowRepository, QueueRepository, TimerRepository, GrantRepository, AuditRepository
 {
   constructor(private readonly db: Database) {}
 
@@ -228,6 +289,7 @@ export class PgShowStore
         lastActiveAt: toDate(show.lastActiveAt),
         expiresAt: toDate(show.expiresAt),
         warningRule: ruleToJson(show.warning),
+        ...scheduleColumns(show.schedule),
       });
       await tx.insert(queues).values({
         id: queue.id,
@@ -266,24 +328,34 @@ export class PgShowStore
 
   async loadQueue(queueId: QueueId): Promise<QueueAggregate | null> {
     const [head] = await this.db
-      .select({ queue: queues, showWarning: shows.warningRule })
+      .select({ queue: queues, show: shows })
       .from(queues)
       .innerJoin(shows, eq(shows.id, queues.showId))
       .where(eq(queues.id, queueId))
       .limit(1);
     if (!head) return null;
-    const [groupRows, itemRows] = await Promise.all([
+    const [groupRows, itemRows, lockRows, requestRows] = await Promise.all([
       this.db.select().from(queueGroups).where(eq(queueGroups.queueId, queueId)),
       this.db
         .select({ item: queueItems, timer: itemTimers })
         .from(queueItems)
         .leftJoin(itemTimers, eq(itemTimers.queueItemId, queueItems.id))
         .where(eq(queueItems.queueId, queueId)),
+      this.db.select().from(locks).where(eq(locks.queueId, queueId)),
+      this.db
+        .select()
+        .from(unlockRequests)
+        .where(and(eq(unlockRequests.queueId, queueId), isNull(unlockRequests.resolvedAt))),
     ]);
     const q = head.queue;
     return {
       showId: ShowId(q.showId),
-      showWarning: ruleFromJson(head.showWarning),
+      showWarning: ruleFromJson(head.show.warningRule),
+      showSchedule: scheduleFromRow(head.show),
+      locks: lockRows.map(lockFromRow),
+      unlockRequests: requestRows
+        .sort((a, b) => +a.requestedAt - +b.requestedAt)
+        .map(requestFromRow),
       queue: {
         id: QueueId(q.id),
         showId: ShowId(q.showId),
@@ -292,6 +364,7 @@ export class PgShowStore
         position: q.position,
         currentItemId: q.currentItemId === null ? null : QueueItemId(q.currentItemId),
         warning: ruleOrNull(q.warningRule),
+        timingMode: q.timingMode as TimingMode | null,
         revision: q.revision,
       },
       groups: groupRows.map(groupFromRow),
@@ -305,7 +378,11 @@ export class PgShowStore
    * compare-and-set on its own revision) — and finally the current pointer. Any lost race rolls
    * everything back, so END + NEXT is all-or-nothing.
    */
-  async saveQueue(prev: QueueAggregate, next: QueueAggregate): Promise<Result<void, AppError>> {
+  async saveQueue(
+    prev: QueueAggregate,
+    next: QueueAggregate,
+    audit: readonly AuditRecord[] = [],
+  ): Promise<Result<void, AppError>> {
     try {
       await this.db.transaction(async (tx) => {
         const claimed = await tx
@@ -315,10 +392,13 @@ export class PgShowStore
           .returning({ id: queues.id });
         if (claimed.length === 0) throw new RevisionConflict();
 
-        if (next.showWarning !== prev.showWarning) {
+        if (next.showWarning !== prev.showWarning || next.showSchedule !== prev.showSchedule) {
           await tx
             .update(shows)
-            .set({ warningRule: ruleToJson(next.showWarning) })
+            .set({
+              warningRule: ruleToJson(next.showWarning),
+              ...scheduleColumns(next.showSchedule),
+            })
             .where(eq(shows.id, next.showId));
         }
 
@@ -381,15 +461,83 @@ export class PgShowStore
 
         if (
           next.queue.currentItemId !== prev.queue.currentItemId ||
-          next.queue.warning !== prev.queue.warning
+          next.queue.warning !== prev.queue.warning ||
+          next.queue.timingMode !== prev.queue.timingMode
         ) {
           await tx
             .update(queues)
             .set({
               currentItemId: next.queue.currentItemId,
               warningRule: ruleToJsonOrNull(next.queue.warning),
+              timingMode: next.queue.timingMode,
             })
             .where(eq(queues.id, next.queue.id));
+        }
+
+        // Locks and unlock requests (part of the aggregate).
+        const prevLocks = new Set(prev.locks.map((l) => l.id));
+        const nextLocks = new Set(next.locks.map((l) => l.id));
+        const addedLocks = next.locks.filter((l) => !prevLocks.has(l.id));
+        if (addedLocks.length > 0) {
+          await tx.insert(locks).values(
+            addedLocks.map((l) => ({
+              id: l.id,
+              showId: next.showId,
+              queueId: next.queue.id,
+              targetKind: l.target.kind,
+              targetId: l.target.id,
+              lockedAt: toDate(l.lockedAt),
+              lockedByKind: l.lockedBy.kind,
+              lockedById: l.lockedBy.id,
+            })),
+          );
+        }
+        const removedLocks = prev.locks.filter((l) => !nextLocks.has(l.id)).map((l) => l.id);
+        if (removedLocks.length > 0) await tx.delete(locks).where(inArray(locks.id, removedLocks));
+
+        const prevRequests = new Set(prev.unlockRequests.map((r) => r.id));
+        const nextRequests = new Set(next.unlockRequests.map((r) => r.id));
+        const addedRequests = next.unlockRequests.filter((r) => !prevRequests.has(r.id));
+        if (addedRequests.length > 0) {
+          await tx.insert(unlockRequests).values(
+            addedRequests.map((r) => ({
+              id: r.id,
+              showId: next.showId,
+              queueId: next.queue.id,
+              lockId: r.lockId,
+              targetKind: r.target.kind,
+              targetId: r.target.id,
+              requestedAt: toDate(r.requestedAt),
+              requestedByKind: r.requestedBy.kind,
+              requestedById: r.requestedBy.id,
+              reason: r.reason,
+            })),
+          );
+        }
+        const resolved = prev.unlockRequests
+          .filter((r) => !nextRequests.has(r.id))
+          .map((r) => r.id);
+        if (resolved.length > 0) {
+          await tx
+            .update(unlockRequests)
+            .set({ resolvedAt: new Date() })
+            .where(inArray(unlockRequests.id, resolved));
+        }
+
+        if (audit.length > 0) {
+          await tx.insert(auditEvents).values(
+            audit.map((a) => ({
+              id: a.id,
+              showId: a.showId,
+              at: toDate(a.at),
+              actorKind: a.actor.kind,
+              actorId: a.actor.id,
+              action: a.action,
+              resourceKind: a.resource.kind,
+              resourceId: a.resource.id,
+              details: { ...a.details },
+            })),
+          );
         }
       });
       return ok(undefined);
@@ -399,6 +547,24 @@ export class PgShowStore
       }
       throw error;
     }
+  }
+
+  async listAudit(showId: ShowId, limit: number): Promise<readonly AuditRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.showId, showId))
+      .orderBy(desc(auditEvents.at), desc(auditEvents.seq))
+      .limit(limit);
+    return rows.map((r) => ({
+      id: r.id,
+      showId: ShowId(r.showId),
+      at: toMs(r.at),
+      actor: { kind: r.actorKind, id: r.actorId },
+      action: r.action,
+      resource: { kind: r.resourceKind, id: r.resourceId },
+      details: r.details,
+    }));
   }
 
   async getBoard(boardId: BoardId): Promise<Board | null> {

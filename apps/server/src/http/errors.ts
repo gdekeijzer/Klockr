@@ -8,6 +8,7 @@ const STATUS: Readonly<Record<ErrorCode, number>> = {
   revision_conflict: 409,
   invalid_transition: 409,
   idempotency_conflict: 422,
+  locked: 423,
   internal: 500,
 };
 

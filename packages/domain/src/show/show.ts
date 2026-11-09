@@ -2,6 +2,7 @@ import type { BoardId, QueueId, QueueItemId, ShowId } from '../ids';
 import { err, ok, type Result } from '../result';
 import type { DurationMs, EpochMs } from '../time';
 import type { Queue, QueueItem } from '../queue';
+import { DEFAULT_SHOW_SCHEDULE, type ShowSchedule } from '../schedule/settings';
 import {
   createTimer,
   DEFAULT_TIMER_THRESHOLDS,
@@ -27,6 +28,8 @@ export interface Show {
   readonly expiresAt: EpochMs;
   /** Show default warning thresholds (top of Show -> Queue -> Queue Item inheritance). */
   readonly warning: TimerThresholds;
+  /** Schedule settings: timing mode default, timezone, show date, tolerance. */
+  readonly schedule: ShowSchedule;
 }
 
 /** Presentation definition over Show data (ADR-0002). M1 has the Speaker preset only. */
@@ -59,6 +62,7 @@ export function createQuickTimerShow(
   ids: QuickTimerIds,
   durationMs: DurationMs,
   now: EpochMs,
+  schedule: Partial<ShowSchedule> = {},
 ): Result<QuickTimerShow, TimerError> {
   const timer = createTimer({ mode: 'countdown', durationMs });
   if (!timer.ok) return err(timer.error);
@@ -72,6 +76,7 @@ export function createQuickTimerShow(
       lastActiveAt: now,
       expiresAt: now + ANONYMOUS_SHOW_TTL_MS,
       warning: DEFAULT_TIMER_THRESHOLDS,
+      schedule: { ...DEFAULT_SHOW_SCHEDULE, ...schedule },
     },
     queue: {
       id: ids.queueId,
@@ -82,6 +87,7 @@ export function createQuickTimerShow(
       // A Quick Timer is immediately operable: its only item is current.
       currentItemId: ids.queueItemId,
       warning: null,
+      timingMode: null,
       revision: 0,
     },
     item: {
@@ -98,6 +104,11 @@ export function createQuickTimerShow(
       startMode: 'manual',
       warning: null,
       timer: timer.value,
+      plannedStartAt: null,
+      plannedDurationMs: null,
+      fixedAnchor: false,
+      actualStartAt: null,
+      actualEndAt: null,
       createdAt: now,
       updatedAt: now,
       revision: 0,
