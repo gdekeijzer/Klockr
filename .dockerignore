@@ -1,0 +1,21 @@
+# Build context for the production images (Dockerfiles in apps/*/Dockerfile, context = repo root).
+# Never send local secrets, dependencies or build output into a build.
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/coverage
+**/*.tsbuildinfo
+**/test-results
+**/playwright-report
+.git
+.github
+.claude
+.env
+.env.*
+!.env.example
+**/.DS_Store
+deploy
+# Docs are not needed, except the design tokens that packages/ui imports at build time.
+docs/**
+!docs/design/tokens.json

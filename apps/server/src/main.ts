@@ -61,3 +61,7 @@ try {
   app.log.fatal(error, 'failed to start');
   process.exit(1);
 }
+app.log.info(
+  { publicUrl: config.KLOCKR_PUBLIC_URL ?? null, secureCookies: config.COOKIE_SECURE },
+  'configuration',
+);

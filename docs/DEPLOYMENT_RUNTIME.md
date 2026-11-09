@@ -29,26 +29,27 @@ Dockerizing Next.js locally is optional, not a development requirement.
 
 ## ACC
 
-ACC is a separate Docker Compose project on the dedicated server.
+ACC is a separate Docker Compose project on the UGREEN NAS (Docker Composer), reachable at **`https://acc.klockr.live`**. Runbook and template: `docs/DEPLOYMENT_UGREEN_ACC.md`, `deploy/acc/compose.yml`.
 
 Expected services:
 
 ```text
 klockr-acc
-  web
-  server
-  worker
-  postgres
+  db        PostgreSQL 18 (no host port)
+  migrate   one-shot migrations (server image)
+  server    host 4100 -> 4000
+  worker    no port
+  web       host 3100 -> 3000
 ```
 
 It has its own:
 
-- `.env` / secrets;
-- hostname;
+- inline configuration and password in the Compose project (no `.env`);
+- hostname `acc.klockr.live`;
 - Compose project name;
-- PostgreSQL named volume;
+- PostgreSQL bind mounts `/volume1/docker/klockr/db/{data,backups}`;
 - backup target;
-- logs;
+- logs (stdout/stderr, kept by Docker);
 - migrations.
 
 ACC is where deploy, migration, realtime, reconnect and acceptance smoke tests are performed against the actual container topology.
@@ -65,7 +66,7 @@ klockr-prd
   postgres
 ```
 
-PRD has completely separate secrets, database volume and hostname. The PRD hostname is the canonical public domain **`klockr.live`** (`https://klockr.live/`, with `/api/v1` and `/realtime` routed by the reverse proxy to the server).
+PRD has completely separate secrets, database volume and hostname. The PRD hostname is the canonical public domain **`klockr.live`** (`https://klockr.live/`, with `/api/v1` and `/realtime/` routed by the Cloudflare Tunnel to the server).
 
 ## Public URL configuration
 
@@ -73,16 +74,16 @@ Images are identical on ACC and PRD, so nothing environment-specific is baked in
 
 | Variable | ACC | PRD | Local |
 | --- | --- | --- | --- |
-| `KLOCKR_PUBLIC_URL` (absolute links without a request origin, e.g. future e-mails) | ACC URL (tbd, `OPEN_QUESTIONS.md` #24) | `https://klockr.live` | `http://localhost:3000` |
+| `KLOCKR_PUBLIC_URL` (absolute links without a request origin, e.g. future e-mails) | `https://acc.klockr.live` | `https://klockr.live` | `http://localhost:3000` |
 | `COOKIE_SECURE` | `true` | `true` | `false` |
 
-The web app itself uses relative routes and the request origin; `klockr.live` is never hardcoded in runtime code.
+The web app itself uses relative routes and the request origin; `klockr.live` is never hardcoded in runtime code. `KLOCKR_SERVER_URL` is not a runtime variable: Next.js bakes rewrite destinations into the build, so the web image is built once with the Docker-internal fallback `http://server:4000` (the Compose service name in every environment).
 
 Deployment to PRD requires an explicit promotion action. Claude Code must not silently deploy production as a side effect of implementation.
 
 ## Build once, promote exact artifacts
 
-A release build produces immutable web/server/worker images tagged by a stable release identifier and preferably addressable by digest.
+A release build produces immutable web/server/worker images tagged by a stable release identifier and preferably addressable by digest: `ghcr.io/gdekeijzer/klockr-{web,server,worker}:<git-sha>` (plus `latest`), published by GitHub Actions on `main` (`docs/CI_CD_RELEASE.md`).
 
 ACC tests those images. PRD uses the exact same image digests/tags. Do not rebuild between ACC acceptance and PRD promotion.
 
@@ -92,7 +93,7 @@ PostgreSQL runs as a service inside each ACC/PRD Compose project.
 
 Required operational properties:
 
-- persistent named volume;
+- persistent storage (ACC: NAS bind mount `/volume1/docker/klockr/db/data` on `/var/lib/postgresql`, the PostgreSQL 18 layout);
 - backups stored outside the database volume;
 - scheduled backup verification;
 - documented restore procedure;
@@ -102,9 +103,15 @@ Required operational properties:
 
 A database container may be recreated; the data volume/backups are not disposable.
 
-## Reverse proxy
+## Public routing (Cloudflare Tunnel)
 
-The dedicated server may use an existing nginx/Caddy/Traefik reverse proxy outside the KLOCKR Compose projects. Route each environment to its web/server services and support websocket upgrades/long-lived connections.
+There is no reverse proxy or gateway container in the KLOCKR stacks. A Cloudflare Tunnel outside the stacks provides DNS, TLS, WebSockets and routing to the local host ports, with path rules per hostname (first match wins):
+
+1. `^/api/v1/` → server host port;
+2. `^/realtime/` → server host port (Socket.IO polling + WebSocket);
+3. everything else → web host port.
+
+ACC: `acc.klockr.live` → NAS 4100 / 4100 / 3100 (`docs/DEPLOYMENT_UGREEN_ACC.md`). PRD later: the same rules on `klockr.live` with the PRD stack's ports.
 
 ## Redis
 

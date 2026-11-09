@@ -1,0 +1,152 @@
+# KLOCKR — ACC (pre-production) stack for the UGREEN NAS Docker Composer.
+#
+#   Public URL : https://acc.klockr.live   (Cloudflare Tunnel, outside this stack)
+#   Host ports : web 3100 -> 3000, server 4100 -> 4000   (nothing else is exposed)
+#   Storage    : /volume1/docker/klockr/db/{data,backups}   (PostgreSQL only)
+#
+# Deploy template: paste into UGREEN Docker Composer as one project. Before the first start:
+#   1. replace CHANGE_ME_TO_A_LONG_RANDOM_PASSWORD in BOTH places below (letters/digits only);
+#   2. create the host directories (docs/DEPLOYMENT_UGREEN_ACC.md).
+#
+# Images: `latest` is convenient for ACC. For a reproducible ACC (and always for PRD) pin the
+# exact Git SHA that was built once by GitHub Actions, e.g.
+#   ghcr.io/gdekeijzer/klockr-server:<git-sha>   (same tag for web, server/migrate, worker)
+# PRD promotes that same SHA; it is never rebuilt.
+#
+# Isolation: ACC never shares its database, storage or credentials with PRD. PRD gets its own
+# stack, host directory, ports and password.
+
+name: klockr-acc
+
+# Change the password here AND in POSTGRES_PASSWORD (service `db`).
+x-database-url: &database-url 'postgres://klockr:CHANGE_ME_TO_A_LONG_RANDOM_PASSWORD@db:5432/klockr'
+
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: klockr
+      POSTGRES_USER: klockr
+      POSTGRES_PASSWORD: 'CHANGE_ME_TO_A_LONG_RANDOM_PASSWORD'
+      TZ: Europe/Amsterdam
+      PGTZ: Europe/Amsterdam
+    volumes:
+      # PostgreSQL 18 keeps its versioned data directory below /var/lib/postgresql
+      # (not the PG17-era /var/lib/postgresql/data).
+      - /volume1/docker/klockr/db/data:/var/lib/postgresql
+      - /volume1/docker/klockr/db/backups:/backups
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U klockr -d klockr']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - internal
+    # No `ports`: PostgreSQL is reachable only inside this stack.
+
+  # One-shot: applies pending Drizzle migrations, then exits 0. Server and worker start only
+  # after it succeeded; a failing migration blocks the deployment (no reset, no recreate).
+  migrate:
+    image: ghcr.io/gdekeijzer/klockr-server:latest
+    command: ['node', 'dist/migrate.js']
+    restart: 'no'
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: *database-url
+      TZ: Europe/Amsterdam
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+
+  server:
+    image: ghcr.io/gdekeijzer/klockr-server:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: '4000'
+      DATABASE_URL: *database-url
+      KLOCKR_PUBLIC_URL: https://acc.klockr.live
+      # Served over HTTPS (Cloudflare): credential cookies get the Secure attribute.
+      COOKIE_SECURE: 'true'
+      # Migrations run in `migrate`, never concurrently from the server.
+      MIGRATE_ON_START: 'false'
+      LOG_LEVEL: info
+      TZ: Europe/Amsterdam
+    ports:
+      - '4100:4000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - internal
+      - edge
+
+  worker:
+    image: ghcr.io/gdekeijzer/klockr-worker:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: *database-url
+      LOG_LEVEL: info
+      TZ: Europe/Amsterdam
+    # No port and no health endpoint; it logs every cycle to stdout.
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - internal
+
+  web:
+    image: ghcr.io/gdekeijzer/klockr-web:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      KLOCKR_PUBLIC_URL: https://acc.klockr.live
+      TZ: Europe/Amsterdam
+    ports:
+      - '3100:3000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      server:
+        condition: service_healthy
+    networks:
+      - edge
+
+networks:
+  # Database traffic only; no route to the outside world.
+  internal:
+    internal: true
+  # Published ports (web 3100, server 4100) and web -> server fallback.
+  edge: {}

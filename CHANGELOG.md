@@ -1,5 +1,14 @@
 # Changelog
 
+## Deployment slice — 2026-11-09 — containers, GHCR, UGREEN ACC
+
+- images: `apps/{web,server,worker}/Dockerfile` (Node 24 Alpine, pnpm 12, multi-stage, non-root, OCI labels, Node-native healthchecks); `.dockerignore`; Next.js `standalone` output for container builds only (`KLOCKR_STANDALONE=1`) with the Docker-internal rewrite fallback `KLOCKR_SERVER_URL=http://server:4000`; turbo build env declares both;
+- server: one-shot migration entrypoint `dist/migrate.js` (real Drizzle migrations, exits non-zero on failure); `KLOCKR_PUBLIC_URL` validated in config and logged at startup;
+- CI: `publish` job (after `check`, pushes to `main` only) builds and pushes `ghcr.io/gdekeijzer/klockr-{web,server,worker}` with `latest` + Git SHA via official Docker actions and `GITHUB_TOKEN`;
+- deploy: `deploy/acc/compose.yml` for the UGREEN Docker Composer (PostgreSQL 18 bind mounts, migrate → server/worker → web, ports 3100/4100 only, no proxy);
+- docs: `DEPLOYMENT_UGREEN_ACC.md` (Cloudflare Tunnel routes, update, logs, backup/restore, ACC/PRD isolation); DEPLOYMENT_RUNTIME, CI_CD_RELEASE, OPEN_QUESTIONS #24-26 resolved;
+- tests: server config test; local Docker acceptance of the full stack.
+
 ## M4 review — 2026-11-09 — OPEN_QUESTIONS #43-46 resolved
 
 - #43: a hidden Current renders `STAND BY` on Boards; the projection carries only `standBy` (no title/metadata/timer/warning/timing of the hidden item), the next visible item is never promoted;

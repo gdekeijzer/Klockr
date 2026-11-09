@@ -6,7 +6,7 @@
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
-      "env": ["NEXT_PUBLIC_*"]
+      "env": ["NEXT_PUBLIC_*", "KLOCKR_STANDALONE", "KLOCKR_SERVER_URL"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],

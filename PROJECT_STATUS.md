@@ -4,6 +4,20 @@
 
 **M4 complete and approved (2026-11-09) — Boards + Multi-Queue.** OPEN_QUESTIONS #43-46 resolved in the review and implemented. Workflow: local checks → commit directly on `main` → push → verify CI on `main` (PRs only on explicit request).
 
+## Deployment slice (2026-11-09) — containers, GHCR, UGREEN ACC
+
+Not a milestone; M5 not started.
+
+- production images `ghcr.io/gdekeijzer/klockr-{web,server,worker}` (Node 24 Alpine, pnpm 12, multi-stage, non-root `node` user, OCI labels); web = Next.js standalone, server = tsup bundle + `pnpm deploy --prod` dependencies, also the one-shot migration entrypoint `node dist/migrate.js`
+- GitHub Actions job `publish`: after the full `check` job on pushes to `main`, builds and pushes all three images with tags `latest` + Git SHA (GHCR via `GITHUB_TOKEN`, GHA layer cache)
+- ACC Compose template `deploy/acc/compose.yml` for the UGREEN Docker Composer: `db` (PostgreSQL 18, bind mounts `/volume1/docker/klockr/db/{data,backups}`), `migrate` (one-shot), `server` (4100), `worker`, `web` (3100); internal network for the database; no reverse proxy; inline config with password placeholders
+- Cloudflare Tunnel routes for `acc.klockr.live` documented: `/api/v1/*` and `/realtime/*` → 4100, rest → 3100
+- runbook `docs/DEPLOYMENT_UGREEN_ACC.md` (directories, Composer, routes, update, logs, backup/restore, isolation)
+- local Docker acceptance passed: empty DB → healthy → migrations → server/worker/web healthy; Quick Timer, realtime over WebSocket on `/realtime/` via path routing, Speaker Board counting, server restart, PostgreSQL restart, `down`/`up` without `-v`, multi-Queue/Boards smoke, failing migration blocks the stack, `pg_dump`/`pg_restore` round-trip
+- OPEN_QUESTIONS #24-26 resolved (ACC hostname, registry, routing)
+
+Known limitations: images are `linux/amd64` only; the worker has no health endpoint; no automated backups (#27); package visibility is set to Public manually.
+
 ## M4 delivered
 
 - one `ShowAggregate` per Show (all Queues, relations, suggestions, Boards, Messages, locks) with one Show revision for compare-and-set and per-Queue revisions for gating/conflicts; every change through `mutateShow`

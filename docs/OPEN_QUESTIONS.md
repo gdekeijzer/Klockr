@@ -60,9 +60,9 @@ Accepted: dedicated server, DEV/TST local/CI, ACC + PRD as separate Docker Compo
 
 Remaining:
 
-24. ACC hostname/domain. (PRD resolved: `klockr.live`.)
-25. Container registry/provider and image naming convention.
-26. Reverse proxy choice/configuration if not already standardized on the dedicated server.
+24. ~~ACC hostname/domain~~ — **Resolved:** ACC `https://acc.klockr.live`, PRD `https://klockr.live`.
+25. ~~Container registry/provider and image naming~~ — **Resolved:** GHCR, `ghcr.io/gdekeijzer/klockr-{web,server,worker}`, tags `latest` + full Git SHA (published by GitHub Actions on `main`).
+26. ~~Reverse proxy~~ — **Resolved:** no proxy container; an external Cloudflare Tunnel routes `/api/v1/*` and `/realtime/*` to the server port and everything else to the web port (`docs/DEPLOYMENT_UGREEN_ACC.md`).
 27. Backup destination, schedule, encryption and retention.
 28. Log/audit retention periods.
 29. Production RPO/RTO targets for claimed Shows.
