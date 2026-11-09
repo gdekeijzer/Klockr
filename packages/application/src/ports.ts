@@ -1,13 +1,11 @@
 import type {
   AccessGrant,
   ActorRef,
-  Board,
   BoardId,
   EpochMs,
   GrantId,
   Permission,
-  QueueAggregate,
-  QueueId,
+  ShowAggregate,
   QueueItemId,
   QuickTimerShow,
   Result,
@@ -59,27 +57,24 @@ export interface ShowRepository extends ShowLocator {
   /** Persist all parts of a new Quick Timer Show and its grants atomically. */
   createQuickTimerShow(bundle: QuickTimerShow, grants: readonly NewGrantRecord[]): Promise<void>;
   getShow(showId: ShowId): Promise<Show | null>;
-  getBoard(boardId: BoardId): Promise<Board | null>;
-  getBoardOfShow(showId: ShowId): Promise<Board | null>;
   /** Record management activity (feeds anonymous lifecycle/cleanup protection). */
   touch(showId: ShowId, at: EpochMs): Promise<void>;
 }
 
 /**
- * Queue persistence. A Queue (with its Groups, Items, item timers and the Show warning default it
- * inherits) is one consistency boundary.
+ * Show persistence (M4 consistency boundary): all peer Queues with Groups, Items and timers,
+ * locks, relations, pending suggestions, Boards and active Messages.
  */
-export interface QueueRepository {
-  loadQueue(queueId: QueueId): Promise<QueueAggregate | null>;
+export interface ShowStateRepository {
+  loadShowAggregate(showId: ShowId): Promise<ShowAggregate | null>;
   /**
-   * Atomically persist `next` (one transaction): only if the stored Queue revision still equals
-   * `prev.queue.revision` and every timer that differs between `prev` and `next` still has the
-   * revision it had in `prev` (compare-and-set). Otherwise nothing is written and
-   * `revision_conflict` is returned. Unchanged items/timers are not rewritten.
+   * Atomically persist `next` in one transaction: only if the stored Show revision still equals
+   * `prev.revision` and every timer that differs still has its `prev` revision (compare-and-set).
+   * Writes only what differs, plus the given audit records. Otherwise `revision_conflict`.
    */
-  saveQueue(
-    prev: QueueAggregate,
-    next: QueueAggregate,
+  saveShowAggregate(
+    prev: ShowAggregate,
+    next: ShowAggregate,
     audit?: readonly AuditRecord[],
   ): Promise<Result<void, AppError>>;
 }
@@ -147,17 +142,17 @@ export interface TimerTransitionedEvent {
   readonly occurredAt: EpochMs;
 }
 
-/** A committed Queue change (structure, current/next, lifecycle, overrides, timers via END). */
-export interface QueueChangedEvent {
-  readonly type: 'queue.changed';
+/** A committed change of the Show aggregate (any Queue, relations, suggestions, Boards, Messages). */
+export interface ShowChangedEvent {
+  readonly type: 'show.changed';
   readonly commandId: string;
   readonly commandType: string;
   readonly showId: ShowId;
-  readonly aggregate: QueueAggregate;
+  readonly show: ShowAggregate;
   readonly occurredAt: EpochMs;
 }
 
-export type ApplicationEvent = TimerTransitionedEvent | QueueChangedEvent;
+export type ApplicationEvent = TimerTransitionedEvent | ShowChangedEvent;
 
 /**
  * Receives committed transitions (realtime hub, future Actions). Delivery failures must never

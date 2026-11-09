@@ -4,7 +4,7 @@ import {
   type GrantRepository,
   type AuditRepository,
   type IdempotencyStore,
-  type QueueRepository,
+  type ShowStateRepository,
   type ShowRepository,
   type ShowServiceDeps,
   type TimerRepository,
@@ -15,7 +15,7 @@ import { NodeTokenService } from './infra/tokens';
 
 export interface Persistence {
   readonly store: ShowRepository &
-    QueueRepository &
+    ShowStateRepository &
     TimerRepository &
     GrantRepository &
     AuditRepository;
@@ -34,7 +34,7 @@ export function createServices(options: {
     clock: options.clock,
     shows: store,
     timers: store,
-    queues: store,
+    state: store,
     grants: store,
     audit: store,
     locator: store,

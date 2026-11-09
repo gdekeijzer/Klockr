@@ -179,3 +179,12 @@ Presets (Timer, Speaker, Note, Break) are UI only and all send `item.add`. `GET 
 - `GET /api/v1/shows/:showId/audit?limit=` (owner cookie, `audit.read`) → `{ events: [{ id, at, actor, action, resource, details }] }`, newest first.
 - `POST /api/v1/shows` accepts optional `timeZone` (IANA) and `scheduleDate` (YYYY-MM-DD); the web client sends the creating browser's values.
 - Queue snapshots carry the planning inputs (`plannedStartAt`, `plannedDurationMs`, `fixedAnchor`, `actualStartAt`, `actualEndAt`, `showSchedule`, `timingMode`, `locks`, `unlockRequests`); projected values are derived by clients with the domain engine.
+
+## Implemented in M4
+
+- `POST /api/v1/shows/:showId/commands` accepts the new commands: `queue.create / update / move / setPrimary / delete`, `item.moveToQueue`, `item.setVisibility`, `relation.create / update / delete`, `suggestion.accept / ignore`, `board.create / update / delete`, `message.send / clear`. `item.add`, `group.add`, `queue.setWarning`, `queue.setTimingMode` take an optional `queueId` (default: Primary). The response is `ShowCommandResponse { state, createdId? }` with the full Show State snapshot.
+- `GET /api/v1/shows/:showId/state` returns `ShowStateSnapshot { show {id, title, revision, primaryQueueId, …}, queues[], relations[], suggestions[], boards[], messages[], serverTime }`.
+- `POST /api/v1/shows/:showId/board-shares` accepts `{ boardId? }` (default: the first Board) and returns a read-only token for exactly that Board.
+- `GET /api/v1/shows/:showId/boards/:boardId/preview` (management) returns the same scoped `BoardStateSnapshot` a Board token receives.
+- `GET /api/v1/board/state` (Board token) returns `BoardStateSnapshot { board, version, timeZone, queues[], messages[], serverTime }`.
+- New capabilities: `queue.create`, `queue.delete`, `relation.manage`, `board.manage`, `message.send`. A Board share holds only `board.read`.

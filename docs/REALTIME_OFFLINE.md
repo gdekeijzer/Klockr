@@ -109,3 +109,9 @@ Do not treat WebSocket transport events as the domain model itself.
 
 - Timer transitions are now commits of the Queue aggregate (they also record actual start). Each transition sends `timer.state` and one `queue.state` (and a fresh Board projection); no schedule events are sent per second.
 - Clients recompute the projected schedule locally from the newest Queue snapshot at render time; the projection of a running item is exact from its timestamps, so observers with slightly different clock offsets agree.
+
+## Implementation (M4)
+
+- Operators receive `show.snapshot` on connect and `show.state` on every committed change (gated by Show revision), plus `timer.state` transitions (gated by timer revision).
+- Boards receive only their own scoped `board.snapshot` on every committed change (gated by Board `version`); raw `timer.state` events are no longer sent to Boards because they could leak items outside the Board's sources/audience.
+- Boards keep rendering all running timers (single and multi-Queue) from the last snapshot during an outage, show a subtle RECONNECTING, extrapolate offset/agenda times via `growsAfter`, expire Messages locally, and resynchronise to an authoritative snapshot on reconnect (E2E tested with two Boards).

@@ -5,8 +5,11 @@ import {
   type BoardId,
   type EpochMs,
   type GrantId,
+  queueView,
   type QueueAggregate,
   type QueueId,
+  type QueueState,
+  type ShowAggregate,
   type QueueItemId,
   type QuickTimerShow,
   type Result,
@@ -21,28 +24,40 @@ import type {
   GrantRepository,
   IdGenerator,
   NewGrantRecord,
-  QueueRepository,
   ShowRepository,
+  ShowStateRepository,
   TimerRepository,
   TokenKind,
   TokenService,
 } from '../ports';
 import { changedTimers } from '../queue';
 
-type StoredQueue = Omit<QueueAggregate, 'showId' | 'showWarning' | 'showSchedule'>;
-
 /**
- * In-memory implementation of every persistence port, sharing one store so Queues, timers and
- * grants stay consistent. For tests and for running the server without PostgreSQL.
+ * In-memory implementation of every persistence port, sharing one store so Shows, Queues,
+ * timers and grants stay consistent. For tests and for running the server without PostgreSQL.
+ * Like the PostgreSQL adapter it keeps only pending suggestions and uncleared messages.
  */
 export class InMemoryStore
-  implements ShowRepository, QueueRepository, TimerRepository, GrantRepository, AuditRepository
+  implements ShowRepository, ShowStateRepository, TimerRepository, GrantRepository, AuditRepository
 {
   readonly shows = new Map<string, Show>();
-  readonly queues = new Map<string, StoredQueue>();
-  readonly boards = new Map<string, Board>();
+  readonly aggregates = new Map<string, ShowAggregate>();
   readonly grants = new Map<string, { grant: AccessGrant; tokenHash: string }>();
   readonly audit: AuditRecord[] = [];
+
+  /** All Queues of all Shows (compatibility view for tests). */
+  get queues(): Map<string, QueueState> {
+    return new Map(
+      [...this.aggregates.values()].flatMap((a) => a.queues.map((q) => [q.queue.id, q] as const)),
+    );
+  }
+
+  /** All Boards of all Shows (compatibility view for tests). */
+  get boards(): Map<string, Board> {
+    return new Map(
+      [...this.aggregates.values()].flatMap((a) => a.boards.map((b) => [b.id, b] as const)),
+    );
+  }
 
   listAudit(showId: ShowId, limit: number): Promise<readonly AuditRecord[]> {
     return Promise.resolve(
@@ -55,15 +70,23 @@ export class InMemoryStore
   }
 
   createQuickTimerShow(bundle: QuickTimerShow, grants: readonly NewGrantRecord[]): Promise<void> {
-    this.shows.set(bundle.show.id, bundle.show);
-    this.queues.set(bundle.queue.id, {
-      queue: bundle.queue,
-      groups: [],
-      items: [bundle.item],
+    const { show, queue, item, board } = bundle;
+    this.shows.set(show.id, show);
+    this.aggregates.set(show.id, {
+      showId: show.id,
+      title: show.title,
+      revision: 0,
+      primaryQueueId: show.primaryQueueId,
+      showWarning: show.warning,
+      showSchedule: show.schedule,
+      queues: [{ queue, groups: [], items: [item] }],
       locks: [],
       unlockRequests: [],
+      relations: [],
+      suggestions: [],
+      boards: [board],
+      messages: [],
     });
-    this.boards.set(bundle.board.id, bundle.board);
     for (const record of grants) this.grants.set(record.grant.id, record);
     return Promise.resolve();
   }
@@ -72,90 +95,89 @@ export class InMemoryStore
     return Promise.resolve(this.shows.get(showId) ?? null);
   }
 
-  getBoard(boardId: BoardId): Promise<Board | null> {
-    return Promise.resolve(this.boards.get(boardId) ?? null);
-  }
-
-  getBoardOfShow(showId: ShowId): Promise<Board | null> {
-    return Promise.resolve([...this.boards.values()].find((b) => b.showId === showId) ?? null);
-  }
-
   touch(showId: ShowId, at: EpochMs): Promise<void> {
     const show = this.shows.get(showId);
     if (show) this.shows.set(showId, { ...show, lastActiveAt: at });
     return Promise.resolve();
   }
 
-  // --- Queue aggregate ------------------------------------------------------------------------
+  // --- Show aggregate -------------------------------------------------------------------------
 
-  loadQueue(queueId: QueueId): Promise<QueueAggregate | null> {
-    const stored = this.queues.get(queueId);
-    const show = stored ? this.shows.get(stored.queue.showId) : undefined;
-    if (!stored || !show) return Promise.resolve(null);
-    return Promise.resolve({
-      showId: show.id,
-      showWarning: show.warning,
-      showSchedule: show.schedule,
-      ...stored,
-    });
+  loadShowAggregate(showId: ShowId): Promise<ShowAggregate | null> {
+    return Promise.resolve(this.aggregates.get(showId) ?? null);
   }
 
-  saveQueue(
-    prev: QueueAggregate,
-    next: QueueAggregate,
+  /** Convenience for tests: the single-Queue view of any Queue. */
+  loadQueue(queueId: QueueId | string): Promise<QueueAggregate | null> {
+    for (const show of this.aggregates.values()) {
+      const view = queueView(show, queueId);
+      if (view) return Promise.resolve(view);
+    }
+    return Promise.resolve(null);
+  }
+
+  saveShowAggregate(
+    prev: ShowAggregate,
+    next: ShowAggregate,
     audit: readonly AuditRecord[] = [],
   ): Promise<Result<void, AppError>> {
-    const stored = this.queues.get(prev.queue.id);
-    if (stored?.queue.revision !== prev.queue.revision) {
-      return Promise.resolve(appError('revision_conflict', 'Queue was modified concurrently'));
+    const stored = this.aggregates.get(prev.showId);
+    if (stored?.revision !== prev.revision) {
+      return Promise.resolve(appError('revision_conflict', 'Show was modified concurrently'));
     }
-    const storedTimers = new Map(stored.items.map((i) => [i.id, i.timer]));
-    for (const change of changedTimers(prev, next)) {
+    const storedTimers = new Map(
+      stored.queues.flatMap((q) => q.items.map((i) => [i.id, i.timer] as const)),
+    );
+    const changes = changedTimers(prev, next);
+    for (const change of changes) {
       const current = storedTimers.get(change.id) ?? null;
       if ((current?.revision ?? null) !== (change.before?.revision ?? null)) {
         return Promise.resolve(appError('revision_conflict', 'Timer was modified concurrently'));
       }
     }
-    // Timers unchanged by this command keep their stored (possibly newer) state.
-    const touched = new Set(changedTimers(prev, next).map((c) => c.id));
-    const items = next.items.map((item) =>
-      touched.has(item.id) ? item : { ...item, timer: storedTimers.get(item.id) ?? item.timer },
-    );
-    this.queues.set(next.queue.id, {
-      queue: next.queue,
-      groups: next.groups,
-      items,
-      locks: next.locks,
-      unlockRequests: next.unlockRequests,
+    this.aggregates.set(next.showId, {
+      ...next,
+      suggestions: next.suggestions.filter((x) => x.status === 'pending'),
+      messages: next.messages.filter((m) => m.clearedAt === null),
     });
     this.audit.push(...audit);
     const show = this.shows.get(next.showId);
-    if (show && (show.warning !== next.showWarning || show.schedule !== next.showSchedule)) {
-      this.shows.set(show.id, { ...show, warning: next.showWarning, schedule: next.showSchedule });
+    if (show) {
+      this.shows.set(show.id, {
+        ...show,
+        warning: next.showWarning,
+        schedule: next.showSchedule,
+        primaryQueueId: next.primaryQueueId,
+      });
     }
     return Promise.resolve(ok(undefined));
   }
 
-  // --- Locator / timers -----------------------------------------------------------------------
+  // --- Locator / timers (M0 timer kernel port) ------------------------------------------------
 
-  #findItem(queueItemId: QueueItemId) {
-    for (const stored of this.queues.values()) {
-      const item = stored.items.find((i) => i.id === queueItemId);
-      if (item) return { stored, item };
+  #find(queueItemId: string) {
+    for (const show of this.aggregates.values()) {
+      for (const q of show.queues) {
+        const item = q.items.find((i) => i.id === queueItemId);
+        if (item) return { show, item };
+      }
     }
     return null;
   }
 
   showIdOfItem(queueItemId: QueueItemId): Promise<ShowId | null> {
-    return Promise.resolve(this.#findItem(queueItemId)?.stored.queue.showId ?? null);
+    return Promise.resolve(this.#find(queueItemId)?.show.showId ?? null);
   }
 
   showIdOfBoard(boardId: BoardId): Promise<ShowId | null> {
-    return Promise.resolve(this.boards.get(boardId)?.showId ?? null);
+    for (const show of this.aggregates.values()) {
+      if (show.boards.some((b) => b.id === boardId)) return Promise.resolve(show.showId);
+    }
+    return Promise.resolve(null);
   }
 
   get(queueItemId: QueueItemId): Promise<TimerState | null> {
-    return Promise.resolve(this.#findItem(queueItemId)?.item.timer ?? null);
+    return Promise.resolve(this.#find(queueItemId)?.item.timer ?? null);
   }
 
   save(
@@ -163,14 +185,18 @@ export class InMemoryStore
     next: TimerState,
     previousRevision: number,
   ): Promise<Result<void, AppError>> {
-    const found = this.#findItem(queueItemId);
+    const found = this.#find(queueItemId);
     if (found?.item.timer?.revision !== previousRevision) {
       return Promise.resolve(appError('revision_conflict', 'Timer was modified concurrently'));
     }
-    const { stored } = found;
-    this.queues.set(stored.queue.id, {
-      ...stored,
-      items: stored.items.map((i) => (i.id === queueItemId ? { ...i, timer: next } : i)),
+    const { show } = found;
+    this.aggregates.set(show.showId, {
+      ...show,
+      revision: show.revision + 1,
+      queues: show.queues.map((q) => ({
+        ...q,
+        items: q.items.map((i) => (i.id === queueItemId ? { ...i, timer: next } : i)),
+      })),
     });
     return Promise.resolve(ok(undefined));
   }

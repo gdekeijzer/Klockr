@@ -1,6 +1,6 @@
 import {
   toBoardSnapshot,
-  toQueueSnapshot,
+  toShowStateSnapshot,
   toTimerSnapshot,
   type ApplicationEvent,
   type EventPublisher,
@@ -10,25 +10,26 @@ import {
   type ClientToServerEvents,
   type ServerToClientEvents,
 } from '@klockr/contracts';
-import type { Board, Clock, ShowId } from '@klockr/domain';
+import type { Clock, Show, ShowId } from '@klockr/domain';
 import type { Server } from 'socket.io';
 
-/** Management clients (Operator View, Queue Editor) of a Show. */
+/** Management clients (Operator, Master, Boards admin) of a Show. */
 export const operatorRoom = (showId: string): string => `show:${showId}:operators`;
-/** All Boards of a Show (timer transitions). */
+/** All Boards of a Show (timer transitions; each Board filters to its own timers). */
 export const boardsRoom = (showId: string): string => `show:${showId}:boards`;
-/** One Board (its own projection). */
+/** One Board (its own scoped projection). */
 export const boardRoom = (boardId: string): string => `board:${boardId}`;
 
 export interface HubSources {
-  readonly boardOfShow: (showId: ShowId) => Promise<Board | null>;
+  readonly showMeta: (showId: ShowId) => Promise<Show | null>;
 }
 
 /**
  * Bridges committed application events to realtime clients. Never sends ticks:
- * - timer transition -> one `timer.state` to operators and boards of the Show;
- * - Queue change -> `queue.state` (full Queue) to operators and a fresh `board.snapshot`
- *   (current item only) to each Board, so Boards follow Current automatically.
+ * - timer transition -> one `timer.state` to the Show's management clients;
+ * - Show change -> `show.state` (authoritative management projection) to management clients and
+ *   a freshly computed, server-side scoped `board.snapshot` to EACH Board of the Show (only its
+ *   sources, audience-visible items, its messages).
  * Without an attached Socket.IO server it is a no-op, so commands never depend on delivery.
  */
 export class RealtimeHub implements EventPublisher {
@@ -48,21 +49,25 @@ export class RealtimeHub implements EventPublisher {
     const now = this.clock.now();
     switch (event.type) {
       case 'timer.transitioned':
-        io.to([operatorRoom(event.showId), boardsRoom(event.showId)]).emit(
+        // Boards get their timer data only through their scoped projection (sent with the
+        // `show.changed` of the same commit), never raw timers of Queues outside their sources.
+        io.to(operatorRoom(event.showId)).emit(
           realtimeEvents.timer,
           toTimerSnapshot(event.queueItemId, event.state, now),
         );
         return;
-      case 'queue.changed': {
-        io.to(operatorRoom(event.showId)).emit(
-          realtimeEvents.queue,
-          toQueueSnapshot(event.aggregate, now),
-        );
-        const board = await this.#sources?.boardOfShow(event.showId);
-        if (board) {
+      case 'show.changed': {
+        const meta = await this.#sources?.showMeta(event.showId);
+        if (meta) {
+          io.to(operatorRoom(event.showId)).emit(
+            realtimeEvents.show,
+            toShowStateSnapshot(meta, event.show, now),
+          );
+        }
+        for (const board of event.show.boards) {
           io.to(boardRoom(board.id)).emit(
             realtimeEvents.boardSnapshot,
-            toBoardSnapshot(board, event.aggregate, now),
+            toBoardSnapshot(board, event.show, now),
           );
         }
         return;

@@ -1,13 +1,14 @@
 import {
   createBoardShare,
   createQuickTimer,
-  executeQueueCommand,
+  executeShowCommand,
+  previewBoard,
   getAuditTrail,
   getBoardState,
   getShowState,
   runShowTimerCommand,
   timerCommandFromDto,
-  toQueueSnapshot,
+  toShowStateSnapshot,
   toTimerSnapshot,
   type ShowServiceDeps,
 } from '@klockr/application';
@@ -16,11 +17,13 @@ import {
   idSchema,
   showCommandSchema,
   timerCommandSchema,
-  queueCommandSchema,
+  boardShareRequestSchema,
   type AuditListResponse,
   type BoardShareResponse,
   type CreateQuickTimerResponse,
-  type QueueCommandResponse,
+  type ShowCommandDto,
+  type ShowCommandResponse,
+  type TimerCommandDto,
 } from '@klockr/contracts';
 import { ANONYMOUS_SHOW_TTL_MS, BoardId, ShowId } from '@klockr/domain';
 import type { FastifyInstance, FastifyReply } from 'fastify';
@@ -114,12 +117,20 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
         timer: toTimerSnapshot(result.value.queueItemId, result.value.state, services.clock.now()),
       };
     }
-    const queueCommand = queueCommandSchema.safeParse(command.data);
-    if (!queueCommand.success) return badRequest(reply, queueCommand.error);
-    const result = await executeQueueCommand(showId, queueCommand.data, context, services);
+    // Every other command (Queues, items, groups, relations, suggestions, locks, Boards,
+    // Messages) goes through the single Show mutation path.
+    const result = await executeShowCommand(
+      showId,
+      command.data as Exclude<ShowCommandDto, TimerCommandDto>,
+      context,
+      services,
+    );
     if (!result.ok) return reply.code(httpStatusOf(result.error)).send(errorBody(result.error));
-    const response: QueueCommandResponse = {
-      queue: toQueueSnapshot(result.value.aggregate, services.clock.now()),
+    const meta = await services.shows.getShow(showId);
+    if (!meta)
+      return reply.code(404).send(errorBody({ code: 'not_found', message: 'Show not found' }));
+    const response: ShowCommandResponse = {
+      state: toShowStateSnapshot(meta, result.value.show, services.clock.now()),
       createdId: result.value.createdId,
     };
     return response;
@@ -159,14 +170,33 @@ export function registerApiRoutes(app: FastifyInstance, options: ApiOptions): vo
     if (!params.success) return badRequest(reply, params.error);
     const owner = await ownerFromRequest(request, params.data.showId, services);
     if (!owner) return reply.code(401).send(unauthenticated);
+    const body = boardShareRequestSchema.safeParse(request.body ?? {});
+    if (!body.success) return badRequest(reply, body.error);
     const share = await createBoardShare(
       ShowId(params.data.showId),
       { actor: owner.actor },
       services,
+      body.data.boardId,
     );
     if (!share.ok) return reply.code(httpStatusOf(share.error)).send(errorBody(share.error));
     const response: BoardShareResponse = share.value;
     return reply.code(201).send(response);
+  });
+
+  /** Board preview for management (the same scoped projection a Board token receives). */
+  app.get('/api/v1/shows/:showId/boards/:boardId/preview', async (request, reply) => {
+    const params = showParams.extend({ boardId: idSchema }).safeParse(request.params);
+    if (!params.success) return badRequest(reply, params.error);
+    const owner = await ownerFromRequest(request, params.data.showId, services);
+    if (!owner) return reply.code(401).send(unauthenticated);
+    const preview = await previewBoard(
+      ShowId(params.data.showId),
+      params.data.boardId,
+      { actor: owner.actor },
+      services,
+    );
+    if (!preview.ok) return reply.code(httpStatusOf(preview.error)).send(errorBody(preview.error));
+    return preview.value;
   });
 
   app.get(

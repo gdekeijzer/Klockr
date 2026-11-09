@@ -45,10 +45,10 @@ describe('M3 over HTTP: scheduling, locks, Emergency Override, audit', () => {
         headers: { cookie: show.cookie },
       })
     ).json()) as {
-      queue: { items: { id: string }[]; showSchedule: { timeZone: string } };
+      queues: { items: { id: string }[]; showSchedule: { timeZone: string } }[];
     };
-    expect(state.queue.showSchedule.timeZone).toBe('Europe/Amsterdam');
-    const itemId = state.queue.items[0]?.id ?? '';
+    expect(state.queues[0]?.showSchedule.timeZone).toBe('Europe/Amsterdam');
+    const itemId = state.queues[0]?.items[0]?.id ?? '';
 
     expect(
       (
@@ -98,20 +98,20 @@ describe('M3 over HTTP: scheduling, locks, Emergency Override, audit', () => {
     const show = await createShow(server);
     const operator = server.connect({ role: 'operator', showId: show.showId }, show.cookie);
     const initial = await nextEvent(operator, 'show.snapshot');
-    const itemId = initial.queue.items[0]?.id ?? '';
-    const update = nextEvent(operator, 'queue.state');
+    const itemId = initial.queues[0]?.items[0]?.id ?? '';
+    const update = nextEvent(operator, 'show.state');
     const plannedStartAt = Date.UTC(2026, 10, 10, 8, 0);
     const res = await post(server, show, {
       type: 'item.setSchedule',
       payload: { queueItemId: itemId, plannedStartAt, fixedAnchor: true },
     });
     expect(res.status).toBe(200);
-    const queue = await update;
-    expect(queue.items[0]).toMatchObject({
+    const queue = (await update).queues[0];
+    expect(queue?.items[0]).toMatchObject({
       plannedStartAt,
       fixedAnchor: true,
       actualStartAt: null,
     });
-    expect(queue.revision).toBe(initial.queue.revision + 1);
+    expect(queue?.revision).toBe((initial.queues[0]?.revision ?? 0) + 1);
   });
 });

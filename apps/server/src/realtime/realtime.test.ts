@@ -19,8 +19,8 @@ async function createShow(s: Server) {
   const cookie = cookieFrom(res.headers.getSetCookie());
   const state = (await (
     await fetch(`${s.baseUrl}/api/v1/shows/${body.showId}/state`, { headers: { cookie } })
-  ).json()) as { queue: { items: { id: string }[] } };
-  return { ...body, cookie, itemId: state.queue.items[0]?.id ?? '' };
+  ).json()) as { queues: { items: { id: string }[] }[] };
+  return { ...body, cookie, itemId: state.queues[0]?.items[0]?.id ?? '' };
 }
 
 async function send(
@@ -46,13 +46,14 @@ describe('realtime', () => {
     const show = await createShow(server);
     const board = server.connect({ role: 'board', boardShareToken: show.boardShareToken });
     const snapshot = await nextEvent(board, 'board.snapshot');
-    expect(snapshot.timer).toMatchObject({ status: 'idle', revision: 0 });
+    expect(snapshot.queues[0]?.timers[0]).toMatchObject({ status: 'idle', revision: 0 });
 
-    const update = nextEvent(board, 'timer.state');
+    // Boards receive their timers through their own scoped projection, one per commit.
+    const update = nextEvent(board, 'board.snapshot');
     await send(server, show, 'timer.start');
-    const started = await update;
+    const started = (await update).queues[0]?.timers[0];
     expect(started).toMatchObject({ status: 'running', revision: 1 });
-    expect(started.serverTime).toBeGreaterThanOrEqual(started.startedAt ?? 0);
+    expect(started?.serverTime).toBeGreaterThanOrEqual(started?.startedAt ?? 0);
   });
 
   it('operators connect with the owner cookie and receive the management snapshot', async () => {
@@ -85,6 +86,7 @@ describe('realtime', () => {
     const board = server.connect({ role: 'board', boardShareToken: show.boardShareToken });
     await nextEvent(board, 'board.snapshot');
     const received: unknown[] = [];
+    board.on('board.snapshot', (t) => received.push(t));
     board.on('timer.state', (t) => received.push(t));
     await send(server, show, 'timer.start');
     // Round-trip a clock ping: everything the server sent before the ack has arrived.
@@ -107,7 +109,7 @@ describe('realtime', () => {
 
     const again = server.connect({ role: 'board', boardShareToken: show.boardShareToken });
     const snapshot = await nextEvent(again, 'board.snapshot');
-    expect(snapshot.timer).toMatchObject({ status: 'running', revision: 3 });
+    expect(snapshot.queues[0]?.timers[0]).toMatchObject({ status: 'running', revision: 3 });
   });
 
   it('a client can reconstruct the visible timer from the snapshot timestamps', async () => {
@@ -115,7 +117,7 @@ describe('realtime', () => {
     const show = await createShow(server);
     await send(server, show, 'timer.start');
     const board = server.connect({ role: 'board', boardShareToken: show.boardShareToken });
-    const { timer } = await nextEvent(board, 'board.snapshot');
+    const timer = (await nextEvent(board, 'board.snapshot')).queues[0]?.timers[0];
     if (!timer) throw new Error('board snapshot without timer');
     const state: TimerState = { ...timer };
     const at = timer.serverTime + 90_000;

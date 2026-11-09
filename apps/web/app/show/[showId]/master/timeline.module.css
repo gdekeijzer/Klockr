@@ -1,0 +1,137 @@
+.wrap {
+  display: grid;
+  gap: var(--k-spacing-2);
+}
+
+.lanes {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  border: 1px solid var(--k-border-subtle);
+  border-radius: var(--k-radius-control);
+  overflow: hidden;
+}
+
+.laneLabels {
+  display: grid;
+  grid-auto-rows: 52px;
+  grid-template-rows: 28px;
+  background: var(--k-background-chrome);
+  border-right: 1px solid var(--k-border-subtle);
+}
+
+.axisLabel {
+  height: 28px;
+}
+
+.laneLabel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 var(--k-spacing-2);
+  font-weight: 600;
+  border-top: 1px solid var(--k-border-subtle);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.lock {
+  margin-left: auto;
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+.canvas {
+  position: relative;
+}
+
+.axis {
+  position: relative;
+  height: 28px;
+  border-bottom: 1px solid var(--k-border-subtle);
+}
+
+.tick {
+  position: absolute;
+  top: 6px;
+  font-family: 'Roboto Mono', var(--k-typography-technical-family);
+  font-size: 11px;
+  color: var(--k-text-muted);
+  transform: translateX(-50%);
+}
+
+.lane {
+  position: relative;
+  height: 52px;
+  border-top: 1px solid var(--k-border-subtle);
+}
+
+/* Planned = thin outline behind the projected block. */
+.planned {
+  position: absolute;
+  top: 6px;
+  height: 40px;
+  border: 1px dashed var(--k-border-strong);
+  border-radius: 4px;
+}
+
+/* Projected = the block. No transitions: shifts never animate. */
+.block {
+  position: absolute;
+  top: 10px;
+  height: 32px;
+  display: grid;
+  align-content: center;
+  padding: 0 6px;
+  overflow: hidden;
+  background: var(--k-background-control);
+  border: 1px solid var(--k-border-subtle);
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.block[data-current='true'] {
+  border-left: 4px solid var(--k-text-primary);
+  background: var(--k-background-surface-raised);
+}
+
+.block[data-completed='true'] {
+  opacity: 0.55;
+}
+
+.block[data-selected='true'] {
+  outline: 2px solid var(--k-accent-blue);
+  outline-offset: -2px;
+}
+
+.block[data-conflict='true'] {
+  border-color: var(--k-state-warning);
+}
+
+.blockTitle {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.blockMeta {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--k-text-secondary);
+  white-space: nowrap;
+}
+
+/* Now / playhead. */
+.now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--k-accent-blue);
+  pointer-events: none;
+}

@@ -51,6 +51,11 @@ describe('grantPermits', () => {
     'lock.request',
     'lock.override',
     'audit.read',
+    'queue.create',
+    'queue.delete',
+    'relation.manage',
+    'board.manage',
+    'message.send',
   ] as const)('owner has %s on its own Show; a board share never has it', (permission) => {
     expect(grantPermits(owner, permission, { kind: 'show', showId: show }, 1)).toBe(true);
     expect(grantPermits(owner, permission, { kind: 'show', showId: other }, 1)).toBe(false);

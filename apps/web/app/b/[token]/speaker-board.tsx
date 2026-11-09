@@ -1,18 +1,16 @@
 'use client';
 
-import { deriveTimer, timerPhase } from '@klockr/domain';
-import { colorVar, formatTimer, remainingFraction, timerDigitColor } from '@klockr/ui';
 import { useEffect, useState } from 'react';
-import { ProgressBar } from '../../../components/ProgressBar';
+import { BoardView } from '../../../components/board/BoardView';
 import { useBoardRealtime } from '../../../lib/use-realtime';
 import { useServerNow } from '../../../lib/use-server-now';
 import styles from './board.module.css';
 
 /**
- * Read-only Speaker/Confidence Board. Follows the Program Queue's current item: its title and,
- * when it has one, its timer (rendered locally from the last authoritative state). Never shows
- * operator notes. A brief disconnect never blanks or replaces the display — only a subtle
- * RECONNECTING marker appears.
+ * Read-only Board display. Renders the Board's scoped projection (its sources, its audience, its
+ * components) with the shared constrained renderer. Timers run locally from the last
+ * authoritative state; a brief disconnect never blanks the display — only a subtle RECONNECTING
+ * marker appears, and messages still expire locally.
  */
 export function SpeakerBoard({ token }: { token: string }) {
   const rt = useBoardRealtime(token);
@@ -37,63 +35,14 @@ export function SpeakerBoard({ token }: { token: string }) {
     );
   }
 
-  const current = rt.board.current;
-  const timer = rt.timer;
-  const view = timer ? deriveTimer(timer, now) : null;
-  const phase = view ? timerPhase(view, rt.board.warning) : 'normal';
-  const label =
-    timer?.status === 'paused' ? 'PAUSED' : timer?.status === 'stopped' ? 'STOPPED' : null;
-
   return (
-    <main className={styles.board} data-phase={phase} data-connection={rt.status}>
-      <div className={styles.topbar}>
-        <span className={styles.brand}>KLOCKR</span>
-        {rt.status !== 'connected' && (
-          <span className={styles.reconnecting} data-testid="board-connection" role="status">
-            RECONNECTING
-          </span>
-        )}
-      </div>
-
-      <div className={styles.title} data-testid="board-title" data-has-timer={timer !== null}>
-        {current ? (
-          <>
-            <span className={styles.titleMain}>{current.title}</span>
-            {current.subtitle && <span className={styles.titleSub}>{current.subtitle}</span>}
-          </>
-        ) : (
-          <span className={styles.titleSub}>—</span>
-        )}
-      </div>
-
-      {timer && view ? (
-        <>
-          <div
-            className={`${styles.digits} mono`}
-            style={{ color: timerDigitColor(phase) }}
-            data-testid="board-timer"
-            data-status={timer.status}
-            data-revision={timer.revision}
-          >
-            {formatTimer(view)}
-          </div>
-          <div className={styles.state}>
-            {label && <span data-testid="board-state-label">{label}</span>}
-            {phase === 'overtime' && (
-              <span style={{ color: colorVar('state-critical') }}>OVERTIME</span>
-            )}
-          </div>
-          <div className={styles.progress}>
-            <ProgressBar
-              fraction={remainingFraction(view, timer.durationMs + timer.adjustmentMs)}
-              color={phase === 'normal' ? colorVar('text-secondary') : timerDigitColor(phase)}
-            />
-          </div>
-        </>
-      ) : (
-        <div className={styles.noTimer} data-testid="board-no-timer" />
-      )}
-
+    <>
+      <BoardView
+        board={rt.board}
+        timers={rt.timers}
+        now={now}
+        reconnecting={rt.status !== 'connected'}
+      />
       <button
         type="button"
         className={styles.fullscreen}
@@ -105,7 +54,7 @@ export function SpeakerBoard({ token }: { token: string }) {
       >
         Fullscreen
       </button>
-    </main>
+    </>
   );
 }
 

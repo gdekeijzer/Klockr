@@ -18,6 +18,11 @@ export type Permission =
   | 'lock.request'
   | 'lock.override'
   | 'audit.read'
+  | 'queue.create'
+  | 'queue.delete'
+  | 'relation.manage'
+  | 'board.manage'
+  | 'message.send'
   | 'board.share'
   | 'board.read';
 
@@ -53,6 +58,12 @@ const BUNDLES: Readonly<Record<GrantKind, readonly Permission[]>> = {
     'lock.request',
     'lock.override',
     'audit.read',
+    // M4: peer Queues, cross-Queue relations, Boards and ad-hoc messages of its own Show.
+    'queue.create',
+    'queue.delete',
+    'relation.manage',
+    'board.manage',
+    'message.send',
     'board.share',
   ],
   // Read-only access to one Board projection. Never mutating.

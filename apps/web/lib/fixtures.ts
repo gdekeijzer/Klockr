@@ -1,4 +1,10 @@
-import type { QueueItemSnapshot, QueueSnapshot, TimerSnapshot } from '@klockr/contracts';
+import type {
+  BoardStateSnapshot,
+  QueueItemSnapshot,
+  QueueSnapshot,
+  ShowStateSnapshot,
+  TimerSnapshot,
+} from '@klockr/contracts';
 
 /** Test fixtures for client-side Queue logic. */
 const rule = { kind: 'percent', warningPercent: 20, criticalPercent: 5 } as const;
@@ -46,6 +52,8 @@ export function itemFixture(id: string, patch: Partial<QueueItemSnapshot> = {}):
     fixedAnchor: false,
     actualStartAt: null,
     actualEndAt: null,
+    visibility: null,
+    notesAudiences: [],
     createdAt: 0,
     updatedAt: 0,
     revision: 0,
@@ -61,6 +69,9 @@ export function queueFixture(
     id: 'q',
     showId: 's',
     name: 'Program',
+    discipline: 'Program',
+    position: 0,
+    isPrimary: true,
     revision: 1,
     currentItemId: null,
     nextItemId: null,
@@ -81,5 +92,77 @@ export function queueFixture(
     items,
     serverTime: 0,
     ...patch,
+  };
+}
+
+export function showFixture(queues: QueueSnapshot[], revision = 1): ShowStateSnapshot {
+  return {
+    show: {
+      id: 's',
+      title: 'Show',
+      ownership: 'anonymous',
+      createdAt: 0,
+      expiresAt: 0,
+      revision,
+      primaryQueueId: queues[0]?.id ?? 'q',
+    },
+    queues,
+    relations: [],
+    suggestions: [],
+    boards: [],
+    messages: [],
+    serverTime: 0,
+  };
+}
+
+export function boardFixture(
+  version: number,
+  currentId: string | null,
+  timerRevision = 0,
+): BoardStateSnapshot {
+  return {
+    board: {
+      id: 'b',
+      name: 'Speaker',
+      preset: 'speaker_confidence',
+      audience: 'stage',
+      components: [],
+      presentation: { lowLight: false, showTimes: false },
+    },
+    version,
+    timeZone: 'UTC',
+    queues: [
+      {
+        id: 'q',
+        name: 'Program',
+        discipline: null,
+        isPrimary: true,
+        current: currentId
+          ? {
+              id: currentId,
+              title: currentId,
+              subtitle: null,
+              durationMs: 600_000,
+              plannedStart: null,
+              projectedStart: null,
+              fixedAnchor: false,
+            }
+          : null,
+        currentNotes: null,
+        next: null,
+        upcoming: [],
+        timers: currentId ? [timerFixture(currentId, timerRevision)] : [],
+        warning: { kind: 'percent', warningPercent: 20, criticalPercent: 5 },
+        offsetMs: null,
+        growsAfter: null,
+        toleranceMs: 30_000,
+        severeBehindMs: 300_000,
+        anchor: null,
+        locked: false,
+        suggestion: null,
+      },
+    ],
+    messages: [],
+    serverTime: 0,
   };
 }

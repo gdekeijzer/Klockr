@@ -11,7 +11,11 @@ import {
   type Clock,
   type GrantKind,
   type TimerState,
+  itemById,
+  queueOfItem,
+  queueView,
   transitionItemTimer,
+  withQueueView,
 } from '@klockr/domain';
 import type { CommandContext } from '../command';
 import { appError, type CommandResult } from '../errors';
@@ -25,8 +29,8 @@ import type {
   ShowRepository,
   TokenService,
 } from '../ports';
-import { toBoardSnapshot, toQueueSnapshot, type QueueCommandDeps } from '../queue';
-import { mutateQueue } from '../queue/mutate';
+import { toBoardSnapshot, toShowStateSnapshot, type QueueCommandDeps } from '../queue';
+import { mutateShow } from '../queue/mutate';
 import {
   fromTimerError,
   transitionFor,
@@ -119,23 +123,28 @@ export async function createQuickTimer(
   return ok({ showId: ids.showId, ownerToken: owner.token, boardShareToken: board.token });
 }
 
-/** Issue an additional read-only Speaker Board link for a Show. */
+/**
+ * Issue an additional read-only Board link (credential scoped to exactly one Board). Default:
+ * the first Board of the Show (the M1 Speaker Board).
+ */
 export async function createBoardShare(
   showId: ShowId,
   context: CommandContext,
   deps: ShowServiceDeps,
+  boardId?: string,
 ): Promise<CommandResult<{ boardId: BoardId; boardShareToken: string }>> {
   if (!(await deps.authorizer.can(context.actor, 'board.share', { kind: 'show', id: showId }))) {
     return appError('forbidden', 'Not permitted to share Boards of this Show');
   }
-  const board = await deps.shows.getBoardOfShow(showId);
+  const show = await deps.state.loadShowAggregate(showId);
+  const board = boardId ? show?.boards.find((b) => b.id === boardId) : show?.boards[0];
   if (!board) return appError('not_found', 'Board not found');
   const share = newGrant(deps, 'board_share', showId, board.id);
   await deps.grants.create(share.record);
   return ok({ boardId: board.id, boardShareToken: share.token });
 }
 
-/** Management projection of the Show State (Operator / Queue Editor). */
+/** Management projection of the whole Show (Operator / Master / Boards admin). */
 export async function getShowState(
   showId: ShowId,
   context: CommandContext,
@@ -144,26 +153,18 @@ export async function getShowState(
   if (!(await deps.authorizer.can(context.actor, 'queue.read', { kind: 'show', id: showId }))) {
     return appError('forbidden', 'Not permitted to read this Show');
   }
-  const [show, board] = await Promise.all([
+  const [meta, show] = await Promise.all([
     deps.shows.getShow(showId),
-    deps.shows.getBoardOfShow(showId),
+    deps.state.loadShowAggregate(showId),
   ]);
-  const queue = show ? await deps.queues.loadQueue(show.primaryQueueId) : null;
-  if (!show || !board || !queue) return appError('not_found', 'Show not found');
-  return ok({
-    show: {
-      id: show.id,
-      title: show.title,
-      ownership: show.ownership,
-      createdAt: show.createdAt,
-      expiresAt: show.expiresAt,
-    },
-    board: { id: board.id },
-    queue: toQueueSnapshot(queue, deps.clock.now()),
-  });
+  if (!meta || !show) return appError('not_found', 'Show not found');
+  return ok(toShowStateSnapshot(meta, show, deps.clock.now()));
 }
 
-/** Read-only Board projection for a Board share grant: follows the Program Queue's current. */
+/**
+ * Read-only Board projection for a Board share grant. Scoped server-side to this one Board:
+ * its source Queues, its audience, its components, its messages (see `toBoardSnapshot`).
+ */
 export async function getBoardState(
   boardId: BoardId,
   context: CommandContext,
@@ -172,20 +173,35 @@ export async function getBoardState(
   if (!(await deps.authorizer.can(context.actor, 'board.read', { kind: 'board', id: boardId }))) {
     return appError('forbidden', 'Not permitted to read this Board');
   }
-  const board = await deps.shows.getBoard(boardId);
-  const show = board ? await deps.shows.getShow(board.showId) : null;
-  const queue = show ? await deps.queues.loadQueue(show.primaryQueueId) : null;
-  if (!board || !queue) return appError('not_found', 'Board not found');
-  return ok(toBoardSnapshot(board, queue, deps.clock.now()));
+  const showId = await deps.locator.showIdOfBoard(boardId);
+  const show = showId ? await deps.state.loadShowAggregate(showId) : null;
+  const board = show?.boards.find((b) => b.id === boardId);
+  if (!show || !board) return appError('not_found', 'Board not found');
+  return ok(toBoardSnapshot(board, show, deps.clock.now()));
+}
+
+/** Board preview for management clients (same scoped projection a Board token would get). */
+export async function previewBoard(
+  showId: ShowId,
+  boardId: string,
+  context: CommandContext,
+  deps: ShowServiceDeps,
+): Promise<CommandResult<BoardStateSnapshot>> {
+  if (!(await deps.authorizer.can(context.actor, 'board.manage', { kind: 'show', id: showId }))) {
+    return appError('forbidden', 'Not permitted to manage Boards of this Show');
+  }
+  const show = await deps.state.loadShowAggregate(showId);
+  const board = show?.boards.find((b) => b.id === boardId);
+  if (!show || !board) return appError('not_found', 'Board not found');
+  return ok(toBoardSnapshot(board, show, deps.clock.now()));
 }
 
 /**
- * Live timer command addressed within a Show. Runs through the Queue aggregate (`mutateQueue`)
- * so that a first START records `actualStartAt` atomically with the transition, the schedule
- * projection is recalculated for every client (one `queue.changed`), and `timer.configure`
- * (a timing-configuration edit) respects locks. Transport (start/pause/resume/stop/adjust) is
- * never blocked by a lock. `expectedRevision` refers to the TIMER revision.
- * Items of other Shows are not found (no cross-Show probing).
+ * Live timer command addressed within a Show. Runs through the Show aggregate (`mutateShow`) on
+ * the item's own Queue, so that a first START records `actualStartAt` atomically with the
+ * transition and every client recalculates (one `show.changed`). `timer.configure` (a timing
+ * configuration edit) respects locks; transport is never blocked by a lock. `expectedRevision`
+ * refers to the TIMER revision. Items of other Shows are not found (no cross-Show probing).
  */
 export async function runShowTimerCommand(
   showId: ShowId,
@@ -194,7 +210,7 @@ export async function runShowTimerCommand(
   deps: ShowServiceDeps,
 ): Promise<CommandResult<TimerCommandOutcome>> {
   const queueItemId = QueueItemId(command.payload.queueItemId);
-  const result = await mutateQueue<TimerState>(
+  const result = await mutateShow<TimerState>(
     showId,
     {
       commandId: command.commandId,
@@ -202,8 +218,8 @@ export async function runShowTimerCommand(
       intent: command.payload,
       idempotencyKey: command.idempotencyKey,
       expectedRevision: command.expectedRevision,
-      checkRevision: (agg) => {
-        const timer = agg.items.find((i) => i.id === queueItemId)?.timer;
+      checkRevision: (show) => {
+        const timer = itemById(show, queueItemId)?.timer;
         if (!timer || command.expectedRevision === undefined) return null;
         return command.expectedRevision === timer.revision
           ? null
@@ -221,9 +237,12 @@ export async function runShowTimerCommand(
         command.type === 'timer.configure' ? [{ kind: 'item', id: queueItemId }] : [],
       override: command.override,
       apply: (prev, now) => {
-        const before = prev.items.find((i) => i.id === queueItemId);
+        const queue = queueOfItem(prev, queueItemId);
+        const view = queue ? queueView(prev, queue.queue.id) : null;
+        const before = itemById(prev, queueItemId);
+        if (!view) return appError('not_found', 'Timer not found in this Show', { queueItemId });
         const transitioned = transitionItemTimer(
-          prev,
+          view,
           { id: queueItemId, transition: (state) => transitionFor(command)(state, now) },
           { now },
         );
@@ -237,7 +256,7 @@ export async function runShowTimerCommand(
         const durationChanged =
           command.type === 'timer.configure' && before?.timer?.durationMs !== state.durationMs;
         return ok({
-          aggregate,
+          show: withQueueView(prev, aggregate),
           value: state,
           audit: durationChanged
             ? [

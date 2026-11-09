@@ -371,3 +371,43 @@
     display: none;
   }
 }
+
+/* --- M4: multi-Queue Master ----------------------------------------------------------------- */
+
+.overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--k-spacing-2);
+}
+
+.overviewCell {
+  display: grid;
+  gap: 2px;
+  padding: var(--k-spacing-2);
+  text-align: left;
+  background: var(--k-background-surface-raised);
+  border: 1px solid var(--k-border-subtle);
+  border-radius: var(--k-radius-control);
+  cursor: pointer;
+}
+
+.overviewCell[aria-pressed='true'] {
+  outline: 2px solid var(--k-accent-blue);
+  outline-offset: -2px;
+}
+
+.queueNode {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.queueNode > ul:last-child {
+  grid-column: 1 / -1;
+}
+
+.addQueue {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--k-spacing-1);
+}

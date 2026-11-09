@@ -1,6 +1,7 @@
 import type { BoardId, QueueId, QueueItemId, ShowId } from '../ids';
 import { err, ok, type Result } from '../result';
 import type { DurationMs, EpochMs } from '../time';
+import { presetDefaults, type Board } from '../board';
 import type { Queue, QueueItem } from '../queue';
 import { DEFAULT_SHOW_SCHEDULE, type ShowSchedule } from '../schedule/settings';
 import {
@@ -30,14 +31,6 @@ export interface Show {
   readonly warning: TimerThresholds;
   /** Schedule settings: timing mode default, timezone, show date, tolerance. */
   readonly schedule: ShowSchedule;
-}
-
-/** Presentation definition over Show data (ADR-0002). M1 has the Speaker preset only. */
-export interface Board {
-  readonly id: BoardId;
-  readonly showId: ShowId;
-  readonly preset: 'speaker';
-  readonly createdAt: EpochMs;
 }
 
 export interface QuickTimerShow {
@@ -82,7 +75,7 @@ export function createQuickTimerShow(
       id: ids.queueId,
       showId: ids.showId,
       name: 'Program',
-      purpose: 'program',
+      discipline: 'Program',
       position: 0,
       // A Quick Timer is immediately operable: its only item is current.
       currentItemId: ids.queueItemId,
@@ -103,6 +96,8 @@ export function createQuickTimerShow(
       completedAt: null,
       startMode: 'manual',
       warning: null,
+      visibility: null,
+      notesAudiences: [],
       timer: timer.value,
       plannedStartAt: null,
       plannedDurationMs: null,
@@ -113,6 +108,24 @@ export function createQuickTimerShow(
       updatedAt: now,
       revision: 0,
     },
-    board: { id: ids.boardId, showId: ids.showId, preset: 'speaker', createdAt: now },
+    board: speakerBoard(ids, now),
   });
+}
+
+/** The Quick Timer's Speaker Board: Speaker Confidence preset, audience Stage, Primary Queue. */
+function speakerBoard(ids: QuickTimerIds, now: EpochMs): Board {
+  const defaults = presetDefaults('speaker_confidence');
+  return {
+    id: ids.boardId,
+    showId: ids.showId,
+    name: 'Speaker Board',
+    preset: 'speaker_confidence',
+    audience: defaults.audience,
+    sources: defaults.sources,
+    components: defaults.components,
+    presentation: defaults.presentation,
+    createdAt: now,
+    updatedAt: now,
+    revision: 0,
+  };
 }

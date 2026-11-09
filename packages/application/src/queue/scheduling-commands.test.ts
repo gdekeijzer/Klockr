@@ -46,7 +46,7 @@ describe('M3 scheduling, locks and audit (application layer)', () => {
     deps = {
       clock,
       shows: store,
-      queues: store,
+      state: store,
       timers: store,
       grants: store,
       audit: store,

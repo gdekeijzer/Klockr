@@ -6,7 +6,6 @@ import {
   type BoardStateSnapshot,
   type ClockAck,
   type ClientToServerEvents,
-  type QueueSnapshot,
   type RealtimeAuth,
   type ServerToClientEvents,
   type ShowStateSnapshot,
@@ -17,7 +16,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   applyBoardSnapshot,
   applyBoardTimer,
-  applyQueueSnapshot,
+  applyShowState,
   applyTimerUpdate,
   emptyBoardState,
   emptyManagementState,
@@ -124,54 +123,42 @@ function useSocket(
 
 export interface ShowRealtime extends Connection, ManagementState {
   readonly show: ShowStateSnapshot['show'] | null;
-  readonly boardId: string | null;
-  /** Feed an authoritative Queue received via HTTP (command response); revision-gated. */
-  readonly applyQueue: (queue: QueueSnapshot) => void;
+  /** Feed an authoritative Show state received via HTTP (command response); revision-gated. */
+  readonly applyState: (state: ShowStateSnapshot) => void;
   /** Feed an authoritative timer received via HTTP (command response); revision-gated. */
   readonly applyTimer: (timer: TimerSnapshot) => void;
 }
 
-/** Operator View / Queue Editor subscription (owner cookie). */
+/** Operator / Master / Boards admin subscription (owner cookie): the whole Show. */
 export function useShowRealtime(showId: string): ShowRealtime {
-  const [meta, setMeta] = useState<{ show: ShowStateSnapshot['show']; boardId: string } | null>(
-    null,
-  );
   const [state, setState] = useState<ManagementState>(emptyManagementState);
 
   const connection = useSocket({ role: 'operator', showId }, (socket, onSnapshot) => {
     socket.on(realtimeEvents.showSnapshot, (s) => {
-      setMeta({ show: s.show, boardId: s.board.id });
-      setState((current) => applyQueueSnapshot(current, s.queue));
-      onSnapshot(s.queue.serverTime);
+      setState((current) => applyShowState(current, s));
+      onSnapshot(s.serverTime);
     });
-    socket.on(realtimeEvents.queue, (q) => {
-      setState((current) => applyQueueSnapshot(current, q));
+    socket.on(realtimeEvents.show, (s) => {
+      setState((current) => applyShowState(current, s));
     });
     socket.on(realtimeEvents.timer, (t) => {
       setState((current) => applyTimerUpdate(current, t));
     });
   });
 
-  const applyQueue = useCallback((queue: QueueSnapshot) => {
-    setState((current) => applyQueueSnapshot(current, queue));
+  const applyState = useCallback((s: ShowStateSnapshot) => {
+    setState((current) => applyShowState(current, s));
   }, []);
   const applyTimer = useCallback((timer: TimerSnapshot) => {
     setState((current) => applyTimerUpdate(current, timer));
   }, []);
 
-  return {
-    ...connection,
-    ...state,
-    show: meta?.show ?? null,
-    boardId: meta?.boardId ?? null,
-    applyQueue,
-    applyTimer,
-  };
+  return { ...connection, ...state, show: state.state?.show ?? null, applyState, applyTimer };
 }
 
 export type BoardRealtime = Connection & BoardState;
 
-/** Speaker Board subscription (board token). Follows the Program Queue's current item. */
+/** Board subscription (board token): only this Board's scoped projection. */
 export function useBoardRealtime(token: string): BoardRealtime {
   const [state, setState] = useState<BoardState>(emptyBoardState);
   const connection = useSocket({ role: 'board', boardShareToken: token }, (socket, onSnapshot) => {

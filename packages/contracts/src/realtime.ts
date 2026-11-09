@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { epochMsSchema } from './common';
-import type { QueueSnapshot } from './queue';
-import type { BoardStateSnapshot, ShowStateSnapshot } from './show';
+import type { BoardStateSnapshot } from './board';
+import type { ShowStateSnapshot } from './show';
 import type { TimerSnapshot } from './timer';
 
 /**
@@ -17,8 +17,8 @@ export const realtimeEvents = {
   showSnapshot: 'show.snapshot',
   /** server -> board: full Board projection on connect AND after every Queue change. */
   boardSnapshot: 'board.snapshot',
-  /** server -> operator: authoritative Queue projection after a committed Queue change. */
-  queue: 'queue.state',
+  /** server -> management clients: authoritative Show projection after every committed change. */
+  show: 'show.state',
   /** server -> client: authoritative timer state after a transition. */
   timer: 'timer.state',
   /** client -> server with ack: clock offset probe. */
@@ -39,7 +39,7 @@ export type ClockAck = z.infer<typeof clockAckSchema>;
 export interface ServerToClientEvents {
   'show.snapshot': (snapshot: ShowStateSnapshot) => void;
   'board.snapshot': (snapshot: BoardStateSnapshot) => void;
-  'queue.state': (queue: QueueSnapshot) => void;
+  'show.state': (state: ShowStateSnapshot) => void;
   'timer.state': (timer: TimerSnapshot) => void;
 }
 

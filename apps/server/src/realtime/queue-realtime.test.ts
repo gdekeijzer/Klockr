@@ -45,47 +45,59 @@ async function command(
 ) {
   const res = await post(s, show, type, payload);
   expect(res.status).toBe(200);
-  return (await res.json()) as {
-    queue: {
-      revision: number;
-      currentItemId: string | null;
-      nextItemId: string | null;
-      items: { id: string; title: string }[];
+  const body = (await res.json()) as {
+    state: {
+      queues: {
+        revision: number;
+        currentItemId: string | null;
+        nextItemId: string | null;
+        items: { id: string; title: string }[];
+      }[];
     };
     createdId: string | null;
   };
+  const queue = body.state.queues[0];
+  if (!queue) throw new Error('no queue');
+  return { queue, createdId: body.createdId };
 }
 
 describe('Queue commands over HTTP and realtime', () => {
-  it('operators receive queue.state and the board follows Current automatically', async () => {
+  it('operators receive show.state and the board follows Current automatically', async () => {
     server = await startTestServer();
     const show = await createShow(server);
     const operator = server.connect({ role: 'operator', showId: show.showId }, show.cookie);
     const initial = await nextEvent(operator, 'show.snapshot');
     const board = server.connect({ role: 'board', boardShareToken: show.boardShareToken });
     const boardInitial = await nextEvent(board, 'board.snapshot');
-    expect(boardInitial.current?.title).toBe('Timer');
+    expect(boardInitial.queues[0]?.current?.title).toBe('Timer');
 
-    const queueUpdate = nextEvent(operator, 'queue.state');
+    const queueUpdate = nextEvent(operator, 'show.state');
     const added = await command(server, show, 'item.add', {
       title: 'Speaker A',
       durationMs: 5 * MINUTE_MS,
       notes: 'secret note',
     });
-    const update = await queueUpdate;
-    expect(update.revision).toBe(initial.queue.revision + 1);
-    expect(update.items.map((i) => i.title)).toEqual(['Timer', 'Speaker A']);
-    expect(update.nextItemId).toBe(added.createdId);
+    const update = (await queueUpdate).queues[0];
+    expect(update?.revision).toBe((initial.queues[0]?.revision ?? 0) + 1);
+    expect(update?.items.map((i) => i.title)).toEqual(['Timer', 'Speaker A']);
+    expect(update?.nextItemId).toBe(added.createdId);
 
     const boardUpdate = nextEvent(board, 'board.snapshot');
     const ended = await command(server, show, 'item.end', {
-      queueItemId: initial.queue.currentItemId,
+      queueItemId: initial.queues[0]?.currentItemId,
       next: true,
     });
     expect(ended.queue.currentItemId).toBe(added.createdId);
     const followed = await boardUpdate;
-    expect(followed.current).toEqual({ id: added.createdId, title: 'Speaker A', subtitle: null });
-    expect(followed.timer).toMatchObject({ status: 'idle', durationMs: 5 * MINUTE_MS });
+    expect(followed.queues[0]?.current).toMatchObject({
+      id: added.createdId,
+      title: 'Speaker A',
+      subtitle: null,
+    });
+    expect(followed.queues[0]?.timers[0]).toMatchObject({
+      status: 'idle',
+      durationMs: 5 * MINUTE_MS,
+    });
     // The board never receives operator notes or the queue.
     expect(JSON.stringify(followed)).not.toContain('secret note');
   });
@@ -102,8 +114,8 @@ describe('Queue commands over HTTP and realtime', () => {
     const boardUpdate = nextEvent(board, 'board.snapshot');
     await command(server, show, 'queue.setCurrent', { queueItemId: note.createdId });
     const snapshot = await boardUpdate;
-    expect(snapshot.current?.title).toBe('CEO arrives stage left');
-    expect(snapshot.timer).toBeNull();
+    expect(snapshot.queues[0]?.current?.title).toBe('CEO arrives stage left');
+    expect(snapshot.queues[0]?.timers).toEqual([]);
   });
 
   it('a board token can never send Queue commands', async () => {

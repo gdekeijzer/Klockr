@@ -64,6 +64,8 @@ export const addItemCommandSchema = commandSchema(
     startMode: startModeSchema.optional(),
     groupId: idSchema.nullable().optional(),
     index: index.optional(),
+    /** Target Queue (default: the Show's Primary Queue). */
+    queueId: idSchema.optional(),
   }),
 );
 
@@ -109,7 +111,7 @@ export const endItemCommandSchema = commandSchema('item.end', target.extend({ ne
 
 export const addGroupCommandSchema = commandSchema(
   'group.add',
-  z.object({ title, index: index.optional() }),
+  z.object({ title, index: index.optional(), queueId: idSchema.optional() }),
 );
 export const renameGroupCommandSchema = commandSchema(
   'group.rename',
@@ -124,7 +126,7 @@ export const moveGroupCommandSchema = commandSchema('group.move', groupTarget.ex
 /** Queue override (queue.manage); `warning: null` = Reset to Show default. */
 export const setQueueWarningCommandSchema = commandSchema(
   'queue.setWarning',
-  z.object({ warning: thresholdRuleSchema.nullable() }),
+  z.object({ warning: thresholdRuleSchema.nullable(), queueId: idSchema.optional() }),
 );
 /** Show default (show.manage); always a rule. */
 export const setShowWarningCommandSchema = commandSchema(
@@ -148,7 +150,7 @@ export const setItemScheduleCommandSchema = commandSchema(
 /** Queue override of the timing mode; `mode: null` = inherit the Show default. */
 export const setQueueTimingModeCommandSchema = commandSchema(
   'queue.setTimingMode',
-  z.object({ mode: timingModeSchema.nullable() }),
+  z.object({ mode: timingModeSchema.nullable(), queueId: idSchema.optional() }),
 );
 export const showScheduleSchema = z.object({
   timingMode: timingModeSchema,
@@ -186,6 +188,83 @@ export const requestUnlockCommandSchema = commandSchema(
   z.object({ target: lockTargetSchema, reason: z.string().max(500).nullable().optional() }),
 );
 
+// --- M4: peer Queues, cross-Queue relations, suggested follow, visibility -------------------
+
+export const audienceSchema = z.enum(['stage', 'production', 'backstage', 'public', 'broadcast']);
+export type AudienceDto = z.infer<typeof audienceSchema>;
+const queueName = z.string().trim().min(1).max(60);
+const discipline = z.string().max(40).nullable().optional();
+
+/** queue.create */
+export const createQueueCommandSchema = commandSchema(
+  'queue.create',
+  z.object({ name: queueName, discipline, index: z.int().min(0).max(20).optional() }),
+);
+/** queue.manage */
+export const updateQueueCommandSchema = commandSchema(
+  'queue.update',
+  z.object({ queueId: idSchema, name: queueName.optional(), discipline }),
+);
+export const moveQueueCommandSchema = commandSchema(
+  'queue.move',
+  z.object({ queueId: idSchema, index: z.int().min(0).max(20) }),
+);
+/** show.manage — Primary is the default source for Show-level projections, never a parent. */
+export const setPrimaryQueueCommandSchema = commandSchema(
+  'queue.setPrimary',
+  z.object({ queueId: idSchema }),
+);
+/** queue.delete — refused for the Primary Queue and Queues with live state. */
+export const deleteQueueCommandSchema = commandSchema(
+  'queue.delete',
+  z.object({ queueId: idSchema }),
+);
+/** queue.manage — explicit move of a NOT-live item to another Queue (atomic). */
+export const moveItemToQueueCommandSchema = commandSchema(
+  'item.moveToQueue',
+  target.extend({ queueId: idSchema, groupId: idSchema.nullable(), index }),
+);
+/** queue.manage — `visibility: null` = visible to every audience. */
+export const setItemVisibilityCommandSchema = commandSchema(
+  'item.setVisibility',
+  target.extend({
+    visibility: z.array(audienceSchema).max(5).nullable(),
+    notesAudiences: z.array(audienceSchema).max(5).optional(),
+  }),
+);
+/** relation.manage */
+export const createRelationCommandSchema = commandSchema(
+  'relation.create',
+  z.object({
+    sourceItemId: idSchema,
+    targetItemId: idSchema,
+    offsetMs: z.int().min(-86_400_000).max(86_400_000),
+    preserveOffset: z.boolean(),
+  }),
+);
+export const updateRelationCommandSchema = commandSchema(
+  'relation.update',
+  z.object({
+    relationId: idSchema,
+    offsetMs: z.int().min(-86_400_000).max(86_400_000).optional(),
+    preserveOffset: z.boolean().optional(),
+    active: z.boolean().optional(),
+  }),
+);
+export const deleteRelationCommandSchema = commandSchema(
+  'relation.delete',
+  z.object({ relationId: idSchema }),
+);
+/** item.control — GO / IGNORE on a pending suggested follow. */
+export const acceptSuggestionCommandSchema = commandSchema(
+  'suggestion.accept',
+  z.object({ suggestionId: idSchema }),
+);
+export const ignoreSuggestionCommandSchema = commandSchema(
+  'suggestion.ignore',
+  z.object({ suggestionId: idSchema }),
+);
+
 export const queueCommandSchema = z.discriminatedUnion('type', [
   addItemCommandSchema,
   updateItemCommandSchema,
@@ -209,6 +288,18 @@ export const queueCommandSchema = z.discriminatedUnion('type', [
   setLockCommandSchema,
   releaseLockCommandSchema,
   requestUnlockCommandSchema,
+  createQueueCommandSchema,
+  updateQueueCommandSchema,
+  moveQueueCommandSchema,
+  setPrimaryQueueCommandSchema,
+  deleteQueueCommandSchema,
+  moveItemToQueueCommandSchema,
+  setItemVisibilityCommandSchema,
+  createRelationCommandSchema,
+  updateRelationCommandSchema,
+  deleteRelationCommandSchema,
+  acceptSuggestionCommandSchema,
+  ignoreSuggestionCommandSchema,
 ]);
 export type QueueCommandDto = z.infer<typeof queueCommandSchema>;
 export type QueueCommandType = QueueCommandDto['type'];
@@ -238,6 +329,10 @@ export const queueItemSnapshotSchema = z.object({
   fixedAnchor: z.boolean(),
   actualStartAt: epochMsSchema.nullable(),
   actualEndAt: epochMsSchema.nullable(),
+  /** Audiences that may see the item on Boards; null = everyone. */
+  visibility: z.array(audienceSchema).nullable(),
+  /** Audiences the notes PROPERTY is published to (default none). */
+  notesAudiences: z.array(audienceSchema),
   createdAt: epochMsSchema,
   updatedAt: epochMsSchema,
   revision: revisionSchema,
@@ -280,6 +375,9 @@ export const queueSnapshotSchema = z.object({
   id: idSchema,
   showId: idSchema,
   name: z.string(),
+  discipline: z.string().nullable(),
+  position: z.int().nonnegative(),
+  isPrimary: z.boolean(),
   revision: revisionSchema,
   currentItemId: idSchema.nullable(),
   nextItemId: idSchema.nullable(),
@@ -296,6 +394,29 @@ export const queueSnapshotSchema = z.object({
   serverTime: epochMsSchema,
 });
 export type QueueSnapshot = z.infer<typeof queueSnapshotSchema>;
+
+export const relationSnapshotSchema = z.object({
+  id: idSchema,
+  sourceItemId: idSchema,
+  targetItemId: idSchema,
+  offsetMs: z.int(),
+  preserveOffset: z.boolean(),
+  active: z.boolean(),
+  revision: revisionSchema,
+});
+export type RelationSnapshot = z.infer<typeof relationSnapshotSchema>;
+
+export const suggestionSnapshotSchema = z.object({
+  id: idSchema,
+  relationId: idSchema,
+  sourceQueueId: idSchema,
+  sourceItemId: idSchema,
+  targetQueueId: idSchema,
+  targetItemId: idSchema,
+  createdAt: epochMsSchema,
+  status: z.enum(['pending', 'accepted', 'ignored', 'stale']),
+});
+export type SuggestionSnapshot = z.infer<typeof suggestionSnapshotSchema>;
 
 /** Response of an accepted Queue command: the authoritative Queue after the change. */
 export const queueCommandResponseSchema = z.object({

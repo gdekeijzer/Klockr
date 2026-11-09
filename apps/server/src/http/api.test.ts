@@ -19,7 +19,7 @@ async function createShow(s: Server, durationMs = 300_000) {
     url: `/api/v1/shows/${body.showId}/state`,
     headers: { cookie },
   });
-  const itemId = showStateSnapshotSchema.parse(state.json()).queue.items[0]?.id ?? '';
+  const itemId = showStateSnapshotSchema.parse(state.json()).queues[0]?.items[0]?.id ?? '';
   return { ...body, cookie, itemId, setCookie: res.headers['set-cookie'] };
 }
 
@@ -98,11 +98,11 @@ describe('HTTP API', () => {
     expect(board.statusCode).toBe(200);
     expect(Object.keys(board.json<object>()).sort()).toEqual([
       'board',
-      'current',
-      'queueRevision',
+      'messages',
+      'queues',
       'serverTime',
-      'timer',
-      'warning',
+      'timeZone',
+      'version',
     ]);
 
     const asBearer = await server.app.inject({

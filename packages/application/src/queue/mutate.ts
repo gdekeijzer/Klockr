@@ -1,27 +1,51 @@
 import {
-  firstLock,
+  normalizeShow,
   ok,
+  reconcileSuggestions,
+  showFirstLock,
   type ActorRef,
   type LockTarget,
   type Permission,
-  type QueueAggregate,
+  type ShowAggregate,
   type ShowId,
 } from '@klockr/domain';
 import type { Actor, CommandContext } from '../command';
 import { appError, type AppError, type CommandResult } from '../errors';
 import { stableStringify } from '../idempotency';
-import type { ApplicationEvent, AuditRecord } from '../ports';
-import type { QueueCommandDeps } from './queue-commands';
+import type {
+  ApplicationEvent,
+  AuditRecord,
+  Authorizer,
+  EventPublisher,
+  IdempotencyStore,
+  IdGenerator,
+  ShowRepository,
+  ShowStateRepository,
+} from '../ports';
+import type { Clock } from '@klockr/domain';
 
 export const actorRef = (actor: Actor): ActorRef => ({ kind: actor.kind, id: actor.id });
 
-/** What one attempt of a mutation produced (pure, from the loaded aggregate). */
+export interface MutationDeps {
+  readonly clock: Clock;
+  readonly ids: IdGenerator;
+  readonly shows: ShowRepository;
+  readonly state: ShowStateRepository;
+  readonly idempotency: IdempotencyStore;
+  readonly authorizer: Authorizer;
+  readonly events: EventPublisher;
+  readonly onPublishError?: (error: unknown) => void;
+}
+
+export type AuditDraft = Omit<AuditRecord, 'id' | 'showId' | 'actor' | 'at'>;
+
+/** What one attempt of a mutation produced (pure, from the loaded Show). */
 export interface MutationResult<T> {
-  readonly aggregate: QueueAggregate;
+  readonly show: ShowAggregate;
   readonly value: T;
   /** Audit records for this change (written atomically with it). */
-  readonly audit?: readonly Omit<AuditRecord, 'id' | 'showId' | 'actor' | 'at'>[];
-  /** Additional events to publish after commit (besides `queue.changed`). */
+  readonly audit?: readonly AuditDraft[];
+  /** Additional events to publish after commit (besides `show.changed`). */
   readonly events?: readonly ApplicationEvent[];
 }
 
@@ -31,42 +55,34 @@ export interface MutationSpec<T> {
   /** Fingerprint input for idempotency (type + payload). */
   readonly intent: unknown;
   readonly idempotencyKey?: string | undefined;
-  /** Compared with the Queue revision (Queue commands) — or custom via `checkRevision`. */
+  /** Pinned revision (Queue or timer, see `checkRevision`); disables automatic re-evaluation. */
   readonly expectedRevision?: number | undefined;
-  readonly checkRevision?: (agg: QueueAggregate) => AppError | null;
+  readonly checkRevision?: (show: ShowAggregate) => AppError | null;
   readonly permission: Permission;
   /** Lock targets this command touches (structure/configuration). Empty = never gated. */
-  readonly lockTargets: (agg: QueueAggregate) => readonly LockTarget[];
+  readonly lockTargets: (show: ShowAggregate) => readonly LockTarget[];
   readonly override?: { readonly reason: string } | undefined;
-  readonly apply: (
-    agg: QueueAggregate,
-    now: number,
-  ) => CommandResult<MutationResult<T>> | MutationResult<T>;
+  readonly apply: (show: ShowAggregate, now: number) => CommandResult<MutationResult<T>>;
 }
 
 const MAX_ATTEMPTS = 3;
 
-function isResult<T>(
-  value: CommandResult<MutationResult<T>> | MutationResult<T>,
-): value is CommandResult<MutationResult<T>> {
-  return 'ok' in value;
-}
-
 /**
- * The single mutation path for a Show's Program Queue aggregate (Queue commands AND live timer
- * commands). Order: permission -> idempotent replay -> load -> expected revision -> lock gate
- * (or audited Emergency Override) -> pure domain operation -> one atomic compare-and-set save
- * including audit records -> remember outcome -> publish -> record activity.
+ * The single mutation path of a Show (every Queue command, live timer command, relation,
+ * suggestion, Board and Message command). Order: capability -> idempotent replay -> load ->
+ * expected revision -> lock gate (or audited Emergency Override) -> pure domain operation ->
+ * suggested-follow reconciliation + reference normalization -> ONE atomic compare-and-set save
+ * including audit -> remember outcome -> publish -> record activity.
  *
- * Without an explicit expected revision a lost compare-and-set race is re-evaluated against the
- * fresh state (max. 3 attempts), as if the command had arrived a moment later.
+ * Without a pinned revision a lost compare-and-set race is re-evaluated against the fresh state
+ * (max. 3 attempts), as if the command had arrived a moment later.
  */
-export async function mutateQueue<T>(
+export async function mutateShow<T>(
   showId: ShowId,
   spec: MutationSpec<T>,
   context: CommandContext,
-  deps: QueueCommandDeps,
-): Promise<CommandResult<{ aggregate: QueueAggregate; value: T }>> {
+  deps: MutationDeps,
+): Promise<CommandResult<{ show: ShowAggregate; value: T }>> {
   if (!(await deps.authorizer.can(context.actor, spec.permission, { kind: 'show', id: showId }))) {
     return appError('forbidden', 'Not permitted to perform this action on this Show');
   }
@@ -82,33 +98,19 @@ export async function mutateQueue<T>(
       if (stored.fingerprint !== fingerprint) {
         return appError('idempotency_conflict', 'Idempotency key was used for a different command');
       }
-      return stored.result as CommandResult<{ aggregate: QueueAggregate; value: T }>;
+      return stored.result as CommandResult<{ show: ShowAggregate; value: T }>;
     }
   }
 
-  const show = await deps.shows.getShow(showId);
-  if (!show) return appError('not_found', 'Show not found');
   const actor = actorRef(context.actor);
-
   for (let attempt = 1; ; attempt++) {
-    const prev = await deps.queues.loadQueue(show.primaryQueueId);
-    if (!prev) return appError('not_found', 'Queue not found');
-    const revisionError = spec.checkRevision
-      ? spec.checkRevision(prev)
-      : spec.expectedRevision !== undefined && spec.expectedRevision !== prev.queue.revision
-        ? {
-            code: 'revision_conflict' as const,
-            message: 'Queue has changed since it was read',
-            details: {
-              expectedRevision: spec.expectedRevision,
-              actualRevision: prev.queue.revision,
-            },
-          }
-        : null;
+    const prev = await deps.state.loadShowAggregate(showId);
+    if (!prev) return appError('not_found', 'Show not found');
+    const revisionError = spec.checkRevision ? spec.checkRevision(prev) : null;
     if (revisionError) return { ok: false, error: revisionError };
 
     const now = deps.clock.now();
-    const lock = firstLock(prev, spec.lockTargets(prev));
+    const lock = showFirstLock(prev, spec.lockTargets(prev));
     if (lock && !spec.override) {
       return appError('locked', `Locked by a lock on this ${lock.lock.target.kind}`, {
         lock: { id: lock.lock.id, target: lock.lock.target },
@@ -119,11 +121,14 @@ export async function mutateQueue<T>(
       return appError('forbidden', 'Emergency Override requires the lock.override permission');
     }
 
-    const applied = spec.apply(prev, now);
-    const outcome = isResult(applied) ? applied : ok(applied);
+    const outcome = spec.apply(prev, now);
     if (!outcome.ok) return outcome;
-    const { aggregate, value } = outcome.value;
-    if (aggregate === prev) return ok({ aggregate, value });
+    const { value } = outcome.value;
+    if (outcome.value.show === prev) return ok({ show: prev, value });
+    const show = normalizeShow(
+      reconcileSuggestions(prev, outcome.value.show, { now, newId: () => deps.ids.uuid() }),
+      now,
+    );
 
     const audit: AuditRecord[] = (outcome.value.audit ?? []).map((record) => ({
       ...record,
@@ -151,25 +156,25 @@ export async function mutateQueue<T>(
       });
     }
 
-    const saved = await deps.queues.saveQueue(prev, aggregate, audit);
+    const saved = await deps.state.saveShowAggregate(prev, show, audit);
     if (!saved.ok) {
       const pinned = spec.expectedRevision !== undefined;
       if (saved.error.code === 'revision_conflict' && !pinned && attempt < MAX_ATTEMPTS) continue;
       return saved;
     }
 
-    const result = ok({ aggregate, value });
+    const result = ok({ show, value });
     if (spec.idempotencyKey !== undefined) {
       await deps.idempotency.remember(scope, spec.idempotencyKey, { fingerprint, result });
     }
     const events: ApplicationEvent[] = [
       ...(outcome.value.events ?? []),
       {
-        type: 'queue.changed',
+        type: 'show.changed',
         commandId: spec.commandId,
         commandType: spec.commandType,
         showId,
-        aggregate,
+        show,
         occurredAt: now,
       },
     ];
@@ -183,4 +188,24 @@ export async function mutateQueue<T>(
     await deps.shows.touch(showId, now);
     return result;
   }
+}
+
+/** Pinned Queue revision check for commands that target one Queue. */
+export function queueRevisionCheck(
+  expected: number | undefined,
+  queueId: (show: ShowAggregate) => string | undefined,
+): (show: ShowAggregate) => AppError | null {
+  return (show) => {
+    if (expected === undefined) return null;
+    const id = queueId(show);
+    const queue = show.queues.find((q) => q.queue.id === id)?.queue;
+    const actual = queue ? queue.revision : show.revision;
+    return expected === actual
+      ? null
+      : {
+          code: 'revision_conflict',
+          message: 'Queue has changed since it was read',
+          details: { expectedRevision: expected, actualRevision: actual },
+        };
+  };
 }
